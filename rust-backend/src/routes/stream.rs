@@ -265,7 +265,14 @@ async fn resolve_sources(
         resolve_show_name(&state.http, id, fallback_title)
             .await
             .ok_or(ResolveErr::NotFound)?;
-    let show_name = resolved.name;
+    // Upstream sites (aniwatch/anikoto) index by English titles, so prefer the
+    // English name for searching; fall back to the romaji name when missing.
+    let show_name = resolved
+        .english_name
+        .as_deref()
+        .map(search_ready)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| resolved.name.clone());
 
     // Kenjitsu's providers are sub-only (version param is a no-op) — skip the
     // 3 upstream round-trips entirely on dub requests instead of filtering later.

@@ -71,7 +71,18 @@ pub async fn extract_player_sources(
                     None => return Ok(vec![]),
                 }
             };
-            if is_safe_url(&file).await {
+            // Only trust a direct file whose path token matches the embed URL's
+            // token — otherwise the <source> belongs to a different episode and
+            // would play the wrong video. Fall through to the megaplay path.
+            let page_token = page_url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("");
+            let file_token = file.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+if page_token.is_empty() || page_token != file_token {
+                // skip direct path; continue below
+            } else if is_safe_url(&file).await {
                 let origin = match origin_of(&page_url) {
                     Some(o) => o,
                     None => return Ok(vec![]),
