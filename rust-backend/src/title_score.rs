@@ -106,7 +106,7 @@ pub fn score_title(query: &str, candidate: &str) -> i32 {
 
     // Reward coverage of the query, penalise extra words (spin-offs, sequels).
     let mut score =
-        (hits as f64 / q_words.len() as f64 * 500.0) - ((c_words.len() - hits) as f64 * 25.0);
+        (hits as f64 / q_words.len() as f64 * 500.0) - ((c_words.len().saturating_sub(hits)) as f64 * 25.0);
 
     // Season agreement/disagreement.
     if let Some(q_season) = season_of(&q) {
