@@ -16,8 +16,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     const rust = process.env.RUST_PROXY_URL || "http://localhost:3001";
     return [
-      { source: "/api/movies/m3u8-proxy", destination: `${rust}/api/movies/m3u8-proxy` },
-      { source: "/api/episodes", destination: `${rust}/api/episodes` },
+      // All /api/* is served by the Rust backend (single binary, no Node runtime).
+      { source: "/api/:path*", destination: `${rust}/api/:path*` },
     ];
   },
 };
