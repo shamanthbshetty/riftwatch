@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+/* Motion tokens — strong ease-out for deliberate UI motion. */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --background: #0a0a0f;
+  --foreground: #e8e8ec;
+  --accent: #e11d48;
+  --accent-hover: #f43f5e;
+  --surface: #111115;
+  --surface-hover: #1a1a20;
+  --border: #25252a;
+  --text-muted: #94949e;
+  --text-secondary: #5e5e6a;
+  --badge-sub: #e11d48;
+  --badge-dub: #f59e0b;
+}
+
+[data-theme="light"] {
+  --background: #f8f8fa;
+  --foreground: #111115;
+  --accent: #e11d48;
+  --accent-hover: #be123c;
+  --surface: #ffffff;
+  --surface-hover: #f0f0f4;
+  --border: #d4d4dc;
+  --text-muted: #5e5e6a;
+  --text-secondary: #8a8a96;
+  --badge-sub: #e11d48;
+  --badge-dub: #d97706;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-text-muted: var(--text-muted);
+  --color-text-secondary: var(--text-secondary);
+  --color-badge-sub: var(--badge-sub);
+  --color-badge-dub: var(--badge-dub);
+  --font-sans: 'Satoshi', system-ui, -apple-system, sans-serif;
+  --font-display: 'Clash Display', 'Satoshi', system-ui, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Clash Display', 'Satoshi', system-ui, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* WebKit/Safari fallback for scrollbar-width (which they ignore pre-17). */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+.carousel-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: 40px 0 20px 56px;
+  margin-left: -16px;
+  -webkit-overflow-scrolling: touch;
+}
+.carousel-scroll::-webkit-scrollbar { display: none; }
+.carousel-scroll > * { scroll-snap-align: start; }
+
+/* Card hover: subtle lift, composite-friendly. Hover motion is gated to
+   pointer devices — touch would otherwise stick the card in its raised
+   state after a tap. will-change deliberately omitted: the browser already
+   promotes transform-animated elements, and one layer per card across a
+   full page of rails costs real GPU memory. */
+.card-hover {
+  position: relative;
+  border-radius: 0.375rem;
+  transition: transform 250ms var(--ease-out), box-shadow 250ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-hover:hover {
+    transform: scale(1.05) translateY(-4px);
+    z-index: 20;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.22);
+  }
+}
+
+/* === Animations === */
+
+/* Staggered card entrance */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+/* Page enter */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: page-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Reduced motion: keep comprehension (colors/opacity, instant) and drop
+   movement. Instant feedback still communicates; frozen transforms don't. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .card-hover:hover {
+    transform: none !important;
+  }
+}
+
+/* General fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+/* Pulse glow for notification badge */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Press feedback: subtle scale with a real transition — 0.95 with no
+   transition used to snap instead of press. Includes the color properties
+   so it can coexist with hover-state color changes. */
+.btn-tap {
+  transition: transform 150ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.btn-tap:active {
+  transform: scale(0.96);
+}
+
+video:focus {
+  outline: none;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Toast entrance */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.animate-toast-in {
+  animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Toast exit — toasts teleported away before; now they leave deliberately. */
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(20px) scale(0.95); }
+}
+.animate-toast-out {
+  animation: toast-out 0.2s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Dropdown/menu entrance: grows from its trigger (pair with origin-top-left
+   or origin-top-right), never from nothing. */
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-menu-in {
+  animation: menu-in 150ms var(--ease-out) both;
+}
+
+/* Section header accent dot */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.section-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 1em;
+  background: var(--accent);
+  border-radius: 2px;
+}

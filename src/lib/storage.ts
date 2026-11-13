@@ -1,0 +1,696 @@
+// Watchlist status. Optional on stored items — entries saved before this
+// existed read as "watching", so no migration step is needed.
+export type WatchStatus = "watching" | "completed" | "on-hold" | "planned";
+
+export interface WatchlistItem {
+  id: string;
+  title: string;
+  englishName?: string;
+  thumbnail: string;
+  malId: string;
+  lastEp: number;
+  mode: "sub" | "dub";
+  status?: WatchStatus;
+  timestamp: number;
+}
+
+export interface HistoryItem {
+  id: string;
+  title: string;
+  englishName?: string;
+  thumbnail: string;
+  malId: string;
+  ep: number;
+  mode: "sub" | "dub";
+  timestamp: number;
+}
+
+export interface MovieWatchlistItem {
+  id: string;
+  title: string;
+  poster: string;
+  type: "movie" | "tv";
+  status?: WatchStatus;
+  timestamp: number;
+}
+
+export interface MovieHistoryItem {
+  id: string;
+  title: string;
+  poster: string;
+  type: "movie" | "tv";
+  season?: number;
+  episode?: number;
+  timestamp: number;
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  body: string;
+  thumbnail: string;
+  href: string;
+  hrefSub?: string;
+  hrefDub?: string;
+  subCount?: number;
+  dubCount?: number;
+  read: boolean;
+  timestamp: number;
+}
+
+function get<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function set(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota exceeded */ }
+}
+
+// ponytail: external-store plumbing. Components read localStorage through
+// useSyncExternalStore (see useWatchlists.ts) so a write in one place re-renders
+// every other mounted view instead of leaving them stale until their own reload.
+type StoreListener = () => void;
+const storeListeners = new Set<StoreListener>();
+const snapshotCache = new Map<string, unknown>();
+
+function cachedSnapshot<T>(key: string, compute: () => T): T {
+  if (!snapshotCache.has(key)) snapshotCache.set(key, compute());
+  return snapshotCache.get(key) as T;
+}
+
+export function subscribeStore(listener: StoreListener): () => void {
+  storeListeners.add(listener);
+  return () => {
+    storeListeners.delete(listener);
+  };
+}
+
+/** Drop cached snapshots for `keys` and notify subscribers. */
+function invalidate(...keys: string[]) {
+  for (const key of keys) snapshotCache.delete(key);
+  for (const listener of storeListeners) listener();
+}
+
+/** Drop every cached snapshot whose key starts with `prefix` (no notify). */
+function invalidatePrefix(prefix: string) {
+  for (const key of [...snapshotCache.keys()]) {
+    if (key.startsWith(prefix)) snapshotCache.delete(key);
+  }
+}
+
+// ponytail: autoplay preference (shared by anime + movie watch pages).
+// Plain localStorage, read once per page mount — no subscription needed.
+const AUTOPLAY_KEY = "autoplay";
+
+export function getAutoplayPref(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(AUTOPLAY_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setAutoplayPref(on: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(AUTOPLAY_KEY, on ? "1" : "0");
+  } catch { /* quota exceeded */ }
+  invalidate("autoplay");
+}
+
+export const getAutoplaySnapshot = (): boolean => cachedSnapshot("autoplay", getAutoplayPref);
+
+// ponytail: auto OP/ED skip preference (anime watch page).
+// Default ON — auto-skip only ever jumps within intervals the AniSkip
+// crowd-sourced data reports, and users overwhelmingly expect it.
+const SKIP_KEY = "autoskip";
+
+export function getSkipPref(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(SKIP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setSkipPref(on: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SKIP_KEY, on ? "1" : "0");
+  } catch { /* quota exceeded */ }
+  invalidate("autoskip");
+}
+
+export const getSkipSnapshot = (): boolean => cachedSnapshot("autoskip", getSkipPref);
+
+/**
+ * Raw JSON signature of every key refreshStore() re-reads. Cheap (no JSON.parse)
+ * — lets the periodic poller skip notifying all subscribers when nothing changed.
+ */
+export function storeSignature(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return [
+      "watchlist", "movie-watchlist", "history", "movie-history",
+      "notifications", "movie-notifications", "resume-pos", "theme",
+      "ep-cache", "tv-ep-cache",
+    ].map((k) => `${k}=${localStorage.getItem(k) ?? ""}`).join("|");
+  } catch {
+    return "";
+  }
+}
+
+/** Re-read localStorage after an out-of-band write (e.g. another browser tab). */
+export function refreshStore() {
+  invalidatePrefix("resume:");
+  invalidatePrefix("movie-watched:");
+  invalidatePrefix("watched:");
+  invalidate(
+    "watchlist",
+    "movie-watchlist",
+    "history",
+    "anime-continue",
+    "movie-continue",
+    "movie-history",
+    "notifications",
+    "movie-notifications",
+    "theme"
+  );
+}
+
+// ponytail: anime watchlist & history
+export function getWatchlist(): WatchlistItem[] {
+  return get<WatchlistItem[]>("watchlist") ?? [];
+}
+
+export const getWatchlistSnapshot = (): WatchlistItem[] => cachedSnapshot("watchlist", getWatchlist);
+
+export function addToWatchlist(item: Omit<WatchlistItem, "timestamp">) {
+  const list = getWatchlist().filter((i) => i.id !== item.id);
+  list.unshift({ ...item, timestamp: Date.now() });
+  set("watchlist", list);
+  invalidate("watchlist");
+}
+
+export function removeFromWatchlist(id: string) {
+  set("watchlist", getWatchlist().filter((i) => i.id !== id));
+  const cache = getEpCache();
+  delete cache[id];
+  set("ep-cache", cache);
+  invalidate("watchlist");
+}
+
+export function setWatchlistStatus(id: string, status: WatchStatus) {
+  const list = getWatchlist();
+  const item = list.find((i) => i.id === id);
+  if (!item || item.status === status) return;
+  item.status = status;
+  set("watchlist", list);
+  invalidate("watchlist");
+}
+
+export function addToHistory(item: Omit<HistoryItem, "timestamp">) {
+  // A malformed `ep` from the URL (ep=abc → Number → NaN) would poison the
+  // list: dedupe/compare logic downstream silently never matches NaN.
+  if (!Number.isFinite(item.ep)) return;
+  const hist = getHistory().filter((i) => !(i.id === item.id && i.ep === item.ep));
+  hist.unshift({ ...item, timestamp: Date.now() });
+  if (hist.length > 100) hist.length = 100;
+  set("history", hist);
+  invalidate("history", "anime-continue");
+  invalidatePrefix("watched:");
+}
+
+export function removeFromHistory(id: string, ep: number) {
+  set("history", getHistory().filter((i) => !(i.id === id && i.ep === ep)));
+  invalidate("history", "anime-continue");
+  invalidatePrefix("watched:");
+}
+
+/** Remove EVERY episode row of one show (history page rows are per-show). */
+export function removeShowFromHistory(id: string) {
+  set("history", getHistory().filter((i) => i.id !== id));
+  invalidate("history", "anime-continue");
+  invalidatePrefix("watched:");
+}
+
+function getHistory(): HistoryItem[] {
+  return get<HistoryItem[]>("history") ?? [];
+}
+
+export function getAllHistory(): HistoryItem[] {
+  const hist = getHistory();
+  const seen = new Set<string>();
+  return hist.filter((h) => {
+    if (seen.has(h.id)) return false;
+    seen.add(h.id);
+    return true;
+  });
+}
+
+export function getContinueWatching(): HistoryItem[] {
+  const hist = getHistory();
+  const seen = new Set<string>();
+  return hist.filter((h) => {
+    if (seen.has(h.id)) return false;
+    seen.add(h.id);
+    return true;
+  }).slice(0, 12);
+}
+
+export const getContinueWatchingSnapshot = (): HistoryItem[] =>
+  cachedSnapshot("anime-continue", getContinueWatching);
+
+export const getAllHistorySnapshot = (): HistoryItem[] => cachedSnapshot("history", getAllHistory);
+
+export function getLastWatched(showId: string): HistoryItem | null {
+  return getHistory().find((h) => h.id === showId) ?? null;
+}
+
+export function getWatchedUpTo(showId: string, mode: "sub" | "dub"): number {
+  const hist = getHistory().filter((h) => h.id === showId && h.mode === mode);
+  if (hist.length === 0) return 0;
+  return hist.reduce((latest, h) => (h.timestamp > latest.timestamp ? h : latest)).ep;
+}
+
+export const getWatchedUpToSnapshot = (showId: string, mode: "sub" | "dub"): number =>
+  cachedSnapshot(`watched:${showId}:${mode}`, () => getWatchedUpTo(showId, mode));
+
+// ponytail: playback-position resume (per episode/movie key → seconds)
+interface ResumeEntry {
+  t: number;
+  at: number;
+}
+type ResumeMap = Record<string, ResumeEntry>;
+
+const RESUME_KEY = "resume-pos";
+const RESUME_MAX_ENTRIES = 300;
+const RESUME_MAX_AGE = 90 * 24 * 60 * 60 * 1000;
+
+function getResumeMap(): ResumeMap {
+  return get<ResumeMap>(RESUME_KEY) ?? {};
+}
+
+/** Saved playback position in seconds (0 when none/unknown). */
+export function getResumePos(key: string): number {
+  return getResumeMap()[key]?.t ?? 0;
+}
+
+export function saveResumePos(key: string, time: number) {
+  if (!Number.isFinite(time) || time < 5) return;
+  const map = getResumeMap();
+  map[key] = { t: time, at: Date.now() };
+  // Prune: drop stale entries, then cap the map so it can't grow unbounded.
+  const now = Date.now();
+  let entries = Object.entries(map).filter(([, e]) => now - e.at < RESUME_MAX_AGE);
+  if (entries.length > RESUME_MAX_ENTRIES) {
+    entries.sort((a, b) => b[1].at - a[1].at);
+    entries = entries.slice(0, RESUME_MAX_ENTRIES);
+  }
+  set(RESUME_KEY, Object.fromEntries(entries));
+  invalidatePrefix("resume:");
+  invalidate();
+}
+
+export function clearResumePos(key: string) {
+  const map = getResumeMap();
+  if (!(key in map)) return;
+  delete map[key];
+  set(RESUME_KEY, map);
+  invalidatePrefix("resume:");
+  invalidate();
+}
+
+// ── Resume lookup for detail pages ("Continue from where you left off") ──
+
+export interface ShowResume {
+  ep: number;
+  mode: "sub" | "dub";
+  t: number;
+}
+
+export interface MovieResume {
+  type: "movie" | "tv";
+  season?: number;
+  episode?: number;
+  t: number;
+}
+
+/** Newest saved playback position across any episode of the show. */
+export function getResumeForShow(showId: string): ShowResume | null {
+  const prefix = `anime|${showId}|`;
+  let best: ShowResume | null = null;
+  let bestAt = -1;
+  for (const [k, e] of Object.entries(getResumeMap())) {
+    if (!k.startsWith(prefix)) continue;
+    const parts = k.split("|");
+    const mode = parts[2];
+    const ep = Number(parts[3]);
+    if ((mode !== "sub" && mode !== "dub") || !Number.isInteger(ep) || ep < 1) continue;
+    if (e.at > bestAt) {
+      bestAt = e.at;
+      best = { ep, mode, t: e.t };
+    }
+  }
+  return best;
+}
+
+export const getResumeForShowSnapshot = (showId: string): ShowResume | null =>
+  cachedSnapshot(`resume:show:${showId}`, () => getResumeForShow(showId));
+
+/** Saved playback position for a movie (or a TV episode, with season/episode). */
+export function getResumeForMovie(id: string): MovieResume | null {
+  const prefix = `movie|${id}|`;
+  let best: MovieResume | null = null;
+  let bestAt = -1;
+  for (const [k, e] of Object.entries(getResumeMap())) {
+    if (!k.startsWith(prefix)) continue;
+    const parts = k.split("|");
+    let entry: MovieResume | null = null;
+    if (parts[2] === "movie") {
+      entry = { type: "movie", t: e.t };
+    } else if (parts[2] === "tv") {
+      const season = Number(parts[3]);
+      const episode = Number(parts[4]);
+      if (Number.isInteger(season) && Number.isInteger(episode)) {
+        entry = { type: "tv", season, episode, t: e.t };
+      }
+    }
+    if (entry && e.at > bestAt) {
+      bestAt = e.at;
+      best = entry;
+    }
+  }
+  return best;
+}
+
+export const getResumeForMovieSnapshot = (id: string): MovieResume | null =>
+  cachedSnapshot(`resume:movie:${id}`, () => getResumeForMovie(id));
+
+/** "12:34" or "1:02:03" for resume labels. */
+export function formatMediaTime(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(sec).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+export function getEpCache(): Record<string, number | { sub: number; dub: number }> {
+  return (get("ep-cache") as Record<string, number | { sub: number; dub: number }> | null) ?? {};
+}
+
+export function setEpCache(id: string, count: number | { sub: number; dub: number }) {
+  const cache = getEpCache();
+  cache[id] = count;
+  set("ep-cache", cache);
+  invalidate("ep-cache");
+}
+
+// ponytail: set entire ep-cache (for pruning stale entries)
+export function setFullEpCache(cache: Record<string, number | { sub: number; dub: number }>) {
+  set("ep-cache", cache);
+  invalidate("ep-cache");
+}
+
+// ponytail: anime notifications
+const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+
+function pruneNotifications(list: AppNotification[]): AppNotification[] {
+  const now = Date.now();
+  // Keep every UNREAD notification indefinitely (dropping them silently loses
+  // alerts the user never saw); read ones expire after two weeks.
+  return list.filter((n) => !n.read || now - n.timestamp < TWO_WEEKS);
+}
+
+function migrateNotifications(list: AppNotification[]): AppNotification[] {
+  const migrated = get<boolean>("notif-migrated-v5");
+  if (migrated) return list;
+  set("notif-migrated-v5", true);
+  return [];
+}
+
+export function getNotifications(): AppNotification[] {
+  const list = get<AppNotification[]>("notifications") ?? [];
+  const migrated = migrateNotifications(list);
+  const pruned = pruneNotifications(migrated);
+  if (pruned.length < list.length) set("notifications", pruned);
+  return pruned;
+}
+
+export function addNotification(n: Omit<AppNotification, "read" | "timestamp">) {
+  const list = getNotifications();
+  if (list.some((x) => x.id === n.id)) return;
+  list.unshift({ ...n, read: false, timestamp: Date.now() });
+  while (list.length > 14) {
+    const lastRead = list.findLastIndex((x) => x.read);
+    if (lastRead === -1) break;
+    list.splice(lastRead, 1);
+  }
+  set("notifications", list);
+  invalidate("notifications");
+}
+
+export function markAllRead() {
+  set("notifications", getNotifications().map((n) => ({ ...n, read: true })));
+  invalidate("notifications");
+}
+
+export function markNotificationRead(id: string) {
+  set("notifications", getNotifications().map((n) => n.id === id ? { ...n, read: true } : n));
+  invalidate("notifications");
+}
+
+export function removeNotification(id: string) {
+  set("notifications", getNotifications().filter((n) => n.id !== id));
+  invalidate("notifications");
+}
+
+export function unreadCount(): number {
+  return getNotifications().filter((n) => !n.read).length;
+}
+
+export const getNotificationsSnapshot = (): AppNotification[] =>
+  cachedSnapshot("notifications", getNotifications);
+
+// ponytail: movie watchlist & history
+export function getMovieWatchlist(): MovieWatchlistItem[] {
+  return get<MovieWatchlistItem[]>("movie-watchlist") ?? [];
+}
+
+export const getMovieWatchlistSnapshot = (): MovieWatchlistItem[] =>
+  cachedSnapshot("movie-watchlist", getMovieWatchlist);
+
+export function addToMovieWatchlist(item: Omit<MovieWatchlistItem, "timestamp">) {
+  const list = getMovieWatchlist().filter((i) => i.id !== item.id);
+  list.unshift({ ...item, timestamp: Date.now() });
+  set("movie-watchlist", list);
+  invalidate("movie-watchlist");
+}
+
+export function removeFromMovieWatchlist(id: string) {
+  set("movie-watchlist", getMovieWatchlist().filter((i) => i.id !== id));
+  const cache = getTVEpCache();
+  delete cache[id];
+  set("tv-ep-cache", cache);
+  invalidate("movie-watchlist");
+}
+
+export function setMovieWatchlistStatus(id: string, status: WatchStatus) {
+  const list = getMovieWatchlist();
+  const item = list.find((i) => i.id === id);
+  if (!item || item.status === status) return;
+  item.status = status;
+  set("movie-watchlist", list);
+  invalidate("movie-watchlist");
+}
+
+export function isInMovieWatchlist(id: string): boolean {
+  return getMovieWatchlist().some((i) => i.id === id);
+}
+
+function getMovieHistory(): MovieHistoryItem[] {
+  return get<MovieHistoryItem[]>("movie-history") ?? [];
+}
+
+export function addToMovieHistory(item: Omit<MovieHistoryItem, "timestamp">) {
+  const hist = getMovieHistory().filter((i) => !(i.id === item.id && i.season === item.season && i.episode === item.episode));
+  hist.unshift({ ...item, timestamp: Date.now() });
+  if (hist.length > 50) hist.length = 50;
+  set("movie-history", hist);
+  invalidatePrefix("movie-watched:");
+  invalidate("movie-history", "movie-continue");
+}
+
+export function getContinueWatchingMovies(): MovieHistoryItem[] {
+  const hist = getMovieHistory();
+  const seen = new Set<string>();
+  return hist.filter((h) => {
+    if (seen.has(h.id)) return false;
+    seen.add(h.id);
+    return true;
+  }).slice(0, 12);
+}
+
+export const getContinueWatchingMoviesSnapshot = (): MovieHistoryItem[] =>
+  cachedSnapshot("movie-continue", getContinueWatchingMovies);
+
+export function removeFromMovieHistory(id: string, season?: number, episode?: number) {
+  set("movie-history", getMovieHistory().filter((i) => {
+    if (i.id !== id) return true;
+    if (season !== undefined && i.season !== season) return true;
+    if (episode !== undefined && i.episode !== episode) return true;
+    return false;
+  }));
+  invalidatePrefix("movie-watched:");
+  invalidate("movie-history", "movie-continue");
+}
+
+/** Episodes of one season that have been opened (the red watched tiles). */
+export function getMovieSeasonWatched(id: string, season: number): number {
+  return getMovieHistory().filter((h) => h.id === id && h.season === season && h.episode != null).length;
+}
+
+export const getMovieSeasonWatchedSnapshot = (id: string, season: number): number =>
+  cachedSnapshot(`movie-watched:${id}:${season}`, () => getMovieSeasonWatched(id, season));
+
+/** Latest-viewed season/episode for a TV show (view-based high-water mark,
+    mirroring getWatchedUpTo for anime). */
+export function getMovieWatchedUpTo(id: string): { season?: number; episode?: number } | null {
+  const hist = getMovieHistory().filter((h) => h.id === id);
+  if (hist.length === 0) return null;
+  const latest = hist.reduce((a, h) => (h.timestamp > a.timestamp ? h : a));
+  return { season: latest.season, episode: latest.episode };
+}
+
+export const getMovieWatchedUpToSnapshot = (id: string): { season?: number; episode?: number } | null =>
+  cachedSnapshot(`movie-watched:${id}:latest`, () => getMovieWatchedUpTo(id));
+
+// ponytail: movie notifications
+export function getMovieNotifications(): AppNotification[] {
+  const list = get<AppNotification[]>("movie-notifications") ?? [];
+  const pruned = pruneNotifications(list);
+  if (pruned.length < list.length) set("movie-notifications", pruned);
+  return pruned;
+}
+
+export function addMovieNotification(n: Omit<AppNotification, "read" | "timestamp">) {
+  const list = getMovieNotifications();
+  if (list.some((x) => x.id === n.id)) return;
+  list.unshift({ ...n, read: false, timestamp: Date.now() });
+  while (list.length > 14) {
+    const lastRead = list.findLastIndex((x) => x.read);
+    if (lastRead === -1) break;
+    list.splice(lastRead, 1);
+  }
+  set("movie-notifications", list);
+  invalidate("movie-notifications");
+}
+
+export function markAllMovieRead() {
+  set("movie-notifications", getMovieNotifications().map((n) => ({ ...n, read: true })));
+  invalidate("movie-notifications");
+}
+
+export function markMovieNotificationRead(id: string) {
+  set("movie-notifications", getMovieNotifications().map((n) => n.id === id ? { ...n, read: true } : n));
+  invalidate("movie-notifications");
+}
+
+export function removeMovieNotification(id: string) {
+  set("movie-notifications", getMovieNotifications().filter((n) => n.id !== id));
+  invalidate("movie-notifications");
+}
+
+export function unreadMovieCount(): number {
+  return getMovieNotifications().filter((n) => !n.read).length;
+}
+
+export const getMovieNotificationsSnapshot = (): AppNotification[] =>
+  cachedSnapshot("movie-notifications", getMovieNotifications);
+
+// ponytail: TV show episode count cache (for new episode notifications)
+export function getTVEpCache(): Record<string, number> {
+  return (get("tv-ep-cache") as Record<string, number> | null) ?? {};
+}
+
+export function setTVEpCache(id: string, count: number) {
+  const cache = getTVEpCache();
+  cache[id] = count;
+  set("tv-ep-cache", cache);
+  invalidate("tv-ep-cache");
+}
+
+export function exportData(): string {
+  return JSON.stringify({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    watchlist: getWatchlist(),
+    history: getHistory(),
+    notifications: getNotifications(),
+    movieWatchlist: getMovieWatchlist(),
+    movieHistory: getMovieHistory(),
+    movieNotifications: getMovieNotifications(),
+  }, null, 2);
+}
+
+function isItemArray(v: unknown): v is Record<string, unknown>[] {
+  return Array.isArray(v) && v.every((i) => i !== null && typeof i === "object");
+}
+
+export function importData(json: string): { ok: boolean; error?: string } {
+  try {
+    const data = JSON.parse(json);
+    if (data.version !== 1) return { ok: false, error: "Unsupported export version" };
+    // Shape-check every section: importData writes raw arrays that later get
+    // `.map`'d by renderers — a hand-edited file would crash every page.
+    const sections: [string, string][] = [
+      ["watchlist", "watchlist"],
+      ["history", "history"],
+      ["notifications", "notifications"],
+      ["movieWatchlist", "movie-watchlist"],
+      ["movieHistory", "movie-history"],
+      ["movieNotifications", "movie-notifications"],
+    ];
+    for (const [field, key] of sections) {
+      const v = data[field];
+      if (v === undefined || v === null) continue;
+      if (!isItemArray(v)) return { ok: false, error: `Invalid "${field}" section` };
+      set(key, v);
+    }
+    // Snapshots are cached — without this every mounted view keeps rendering
+    // the pre-import list until a full reload.
+    refreshStore();
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Invalid JSON file" };
+  }
+}
+
+// ponytail: theme persistence
+export function getTheme(): "dark" | "light" {
+  if (typeof window === "undefined") return "dark";
+  const t = localStorage.getItem("theme");
+  if (t === "light" || t === "dark") return t;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+export function setTheme(theme: "dark" | "light") {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("theme", theme);
+  document.documentElement.setAttribute("data-theme", theme);
+  invalidate("theme");
+}
+
+export const getThemeSnapshot = (): "dark" | "light" => cachedSnapshot("theme", getTheme);
