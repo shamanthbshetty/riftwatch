@@ -106,13 +106,12 @@ export default function MovieSpotlightCarousel() {
 
   return (
     <div
-      className="relative w-full h-[450px] mt-[30px] overflow-hidden select-none"
+      className="relative h-[520px] w-full select-none overflow-hidden"
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
       onMouseLeave={() => { onMouseUp(); setHovered(false); }}
       onMouseEnter={() => setHovered(true)}
-      style={{ cursor: "grab" }}
     >
       {/* Background crossfade */}
       {movies.map((m) => {
@@ -123,54 +122,53 @@ export default function MovieSpotlightCarousel() {
             className="absolute inset-0 transition-opacity duration-700 ease-in-out"
             style={{ opacity: m.id === item.id ? 1 : 0 }}
           >
-            {bg && (
-              <Image src={bg} alt="" fill sizes="100vw" priority className="object-cover scale-105 brightness-[0.45]" />
-            )}
+            {bg && <Image src={bg} alt="" fill sizes="100vw" priority={m.id === movies[0]?.id} className="scale-105 object-cover brightness-[0.42]" />}
           </div>
         );
       })}
-      <div className="absolute inset-0 bg-gradient-to-r from-background/90 via-background/50 to-background/20" />
-      <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/30" />
+      <div className="absolute inset-0 bg-gradient-to-r from-background via-background/55 to-background/10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/40" />
 
       {/* Left arrow */}
       <button
+        aria-label="Previous spotlight"
         onClick={(e) => { e.stopPropagation(); prev(); }}
-        className="absolute left-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/70 text-white/70 hover:text-white transition-[background-color,color,transform] duration-200 hover:scale-105"
+        className="absolute left-4 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white/70 opacity-0 transition-[opacity,background-color,color] hover:bg-black/70 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 md:opacity-100"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
       </button>
 
       {/* Right arrow */}
       <button
+        aria-label="Next spotlight"
         onClick={(e) => { e.stopPropagation(); next(); }}
-        className="absolute right-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/70 text-white/70 hover:text-white transition-[background-color,color,transform] duration-200 hover:scale-105"
+        className="absolute right-4 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white/70 opacity-0 transition-[opacity,background-color,color] hover:bg-black/70 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 md:opacity-100"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
       </button>
 
       {/* Content */}
       <div
-        className={`absolute inset-0 z-10 flex items-center transition-[opacity,transform] duration-500 ease-out ${
-          transitioning ? "opacity-0 translate-y-2" : "opacity-100 translate-y-0"
+        className={`absolute inset-0 z-10 flex items-end pb-14 transition-[opacity,transform] duration-500 ease-out md:items-center md:pb-0 ${
+          transitioning ? "translate-y-2 opacity-0" : "translate-y-0 opacity-100"
         }`}
       >
-        <div className="w-full max-w-7xl mx-auto px-8 md:px-16 flex items-center gap-10">
+        <div className="mx-auto flex w-full max-w-7xl items-end gap-8 px-4 md:px-6">
           {/* Poster */}
           {poster && (
-            <div className="hidden md:block relative w-48 aspect-[3/4] rounded-lg overflow-hidden shadow-2xl shadow-black/60 shrink-0 group/poster">
-            <Image
-              src={poster}
-              alt={title}
-              fill
-              sizes="(max-width: 768px) 45vw, 22vw"
-              unoptimized
-              className="object-cover transition-transform duration-500 ease-out group-hover/poster:scale-110"
-            />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover/poster:opacity-100 transition-opacity duration-500" />
+            <div className="group/poster relative hidden aspect-[3/4] w-36 shrink-0 overflow-hidden rounded-surface shadow-2xl shadow-black/60 md:block">
+              <Image
+                src={poster}
+                alt={title}
+                fill
+                sizes="144px"
+                unoptimized
+                className="object-cover"
+              />
               {item.genreNames.length > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 p-2.5 flex flex-wrap gap-1 opacity-0 group-hover/poster:opacity-100 transition-[opacity,transform] duration-500 translate-y-2 group-hover/poster:translate-y-0">
+                <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 p-2.5 opacity-0 transition-opacity duration-300 group-hover/poster:opacity-100">
                   {item.genreNames.slice(0, 4).map((g) => (
-                    <span key={g} className="text-[9px] font-medium bg-accent/90 text-white px-1.5 py-0.5 rounded-full">{g}</span>
+                    <span key={g} className="rounded-chip bg-black/60 px-1.5 py-0.5 text-2xs font-medium text-white/85 backdrop-blur-sm">{g}</span>
                   ))}
                 </div>
               )}
@@ -178,43 +176,35 @@ export default function MovieSpotlightCarousel() {
           )}
 
           {/* Text info */}
-          <div className="flex-1 max-w-2xl">
-            <span className="text-accent text-xs font-bold tracking-widest uppercase mb-2 block">
-              Spotlight #{active + 1}
+          <div className="max-w-xl flex-1">
+            <span className="mb-2 block text-2xs font-semibold uppercase tracking-[0.18em] text-accent">
+              Featured
             </span>
-            <h2 className="text-3xl md:text-5xl font-bold leading-tight mb-4 line-clamp-2">
+            <h2 className="mb-3 line-clamp-2 text-3xl font-semibold leading-[1.1] tracking-tight md:text-4xl">
               {title}
             </h2>
-            <div className="flex items-center gap-2 mb-4 text-xs">
-              {year && (
-                <span className="bg-surface/80 px-2.5 py-1 rounded text-text-muted">{year}</span>
-              )}
-              <span className="bg-accent/20 text-accent px-2.5 py-1 rounded font-bold">HD</span>
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+              {year && <span>{year}</span>}
+              {item.genreNames.length > 0 && <span className="truncate">{item.genreNames.slice(0, 3).join(" · ")}</span>}
             </div>
-            {item.genreNames.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {item.genreNames.slice(0, 5).map((g) => (
-                  <span key={g} className="text-[10px] bg-surface/60 px-2 py-0.5 rounded-full text-text-muted">{g}</span>
-                ))}
-              </div>
-            )}
             {item.overview && (
-              <p className="text-sm text-text-muted leading-relaxed line-clamp-3 mb-5 max-w-lg">
+              <p className="mb-4 line-clamp-3 max-w-lg text-sm leading-relaxed text-text-muted">
                 {item.overview}
               </p>
             )}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <Link
                 href={`/movies/${item.id}/watch?type=movie`}
-                className="bg-accent hover:bg-accent-hover text-white px-7 py-2.5 rounded-lg text-sm font-semibold hover:scale-105 btn-tap"
+                className="inline-flex items-center gap-2 rounded-control bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent-hover btn-tap"
               >
-                Watch Now
+                <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>
+                Watch now
               </Link>
               <Link
                 href={`/movies/${item.id}?type=movie`}
-                className="bg-surface/60 hover:bg-surface border border-border px-7 py-2.5 rounded-lg text-sm font-medium text-text-muted hover:text-foreground hover:scale-105 btn-tap"
+                className="rounded-control border border-white/20 bg-white/5 px-5 py-2.5 text-sm font-medium text-white/85 backdrop-blur-sm transition-colors hover:bg-white/10 hover:text-white btn-tap"
               >
-                Detail
+                Details
               </Link>
             </div>
           </div>
@@ -222,13 +212,14 @@ export default function MovieSpotlightCarousel() {
       </div>
 
       {/* Slide indicators */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex gap-2">
+      <div className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
         {movies.map((m, i) => (
           <button
             key={m.id}
+            aria-label={`Go to slide ${i + 1}`}
             onClick={(e) => { e.stopPropagation(); changeSlide(() => i); }}
-            className={`w-2 h-2 rounded-full transition-[width,background-color] duration-300 ${
-              i === active ? "bg-accent w-6" : "bg-white/30 hover:bg-white/50"
+            className={`h-1 rounded-full transition-[width,background-color] duration-300 ${
+              i === active ? "w-6 bg-accent" : "w-2 bg-white/30 hover:bg-white/50"
             }`}
           />
         ))}

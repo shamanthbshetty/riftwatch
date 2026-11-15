@@ -2,13 +2,17 @@
 
 import { useEffect, useState, use } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import SubDubToggle from "@/components/SubDubToggle";
 import EpisodeList from "@/components/EpisodeList";
+import MediaCard from "@/components/MediaCard";
+import Rail from "@/components/Rail";
+import SectionHeader from "@/components/SectionHeader";
+import EmptyState from "@/components/Skeleton";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
-import { addToWatchlist, removeFromWatchlist, setWatchlistStatus, formatMediaTime, type WatchStatus } from "@/lib/storage";
-import { useWatchlistItems, useShowResume } from "@/lib/useWatchlists";
+import { addToWatchlist, removeFromWatchlist, setWatchlistStatus, addToHistory, formatMediaTime, type WatchStatus } from "@/lib/storage";
+import { useWatchlistItems, useShowResume, useWatchedUpTo } from "@/lib/useWatchlists";
+import { sameShow } from "@/lib/show-id";
 import { useToast } from "@/lib/toast";
 
 interface ShowDetail {
@@ -55,8 +59,6 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
   const [mode, setMode] = useState<"sub" | "dub">("sub");
   const [retryKey, setRetryKey] = useState(0);
   const watchlist = useWatchlistItems();
-  const inWatchlist = watchlist.some((i) => i.id === id);
-  const wlStatus = watchlist.find((i) => i.id === id)?.status ?? null;
   const resume = useShowResume(id);
   const { toast } = useToast();
 
@@ -74,11 +76,21 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
 
   const current = loaded?.key === key ? loaded : null;
   const show = current?.show ?? null;
+  const watchedUpTo = useWatchedUpTo(show?._id || id, mode);
   const titles = current?.titles ?? EMPTY_TITLES;
   const schedule = current?.schedule ?? null;
   const relations = current?.relations ?? [];
   const loading = current === null;
   const descExpanded = expandedKey === key;
+
+  // Matched against every identity this page can prove (route id, canonical
+  // id, MAL id) — the entry may have been added from a different surface
+  // (spotlight/schedule/search) that used a different id for the same show.
+  const wlEntry = show
+    ? watchlist.find((i) => sameShow(i, { id, canonicalId: show._id, malId: show.malId })) ?? null
+    : null;
+  const inWatchlist = wlEntry !== null;
+  const wlStatus = wlEntry?.status ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +105,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
           // Publish the show immediately, then enrich it with titles/schedule/relations.
           setLoaded({ key, show: data, titles: empty, schedule: null, relations: [] });
           if (data.malId) {
-            void fetch(`/api/titles?malId=${encodeURIComponent(data.malId)}`)
+            void fetch(`/api/titles?malId=${encodeURIComponent(data.malId)}&title=${encodeURIComponent(data.englishName || data.name || "")}`)
               .then((r) => r.json())
               .then((t) => {
                 if (cancelled) return;
@@ -138,8 +150,13 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
 
   function addWithStatus(status: WatchStatus) {
     if (!show) return;
+    // Store under the canonical id (survives every route), replacing any
+    // legacy entry saved under another namespace — otherwise the same show
+    // ends up as two watchlist cards.
+    const canonicalId = show._id || id;
+    if (wlEntry && wlEntry.id !== canonicalId) removeFromWatchlist(wlEntry.id);
     addToWatchlist({
-      id,
+      id: canonicalId,
       title: show.name,
       englishName: show.englishName,
       thumbnail: show.thumbnail,
@@ -152,22 +169,35 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   function changeStatus(status: WatchStatus) {
-    setWatchlistStatus(id, status);
+    if (!wlEntry) return;
+    setWatchlistStatus(wlEntry.id, status);
     toast(`Marked as ${STATUS_LABELS[status]}`);
   }
 
   function removeFromList() {
-    removeFromWatchlist(id);
+    if (!wlEntry) return;
+    removeFromWatchlist(wlEntry.id);
     toast("Removed from watchlist");
   }
 
   function selectEpisode(ep: number) {
+    if (show) {
+      addToHistory({
+        id: show._id || id,
+        title: show.name,
+        englishName: show.englishName,
+        thumbnail: show.thumbnail,
+        malId: show.malId ?? "",
+        ep: Number(ep),
+        mode,
+      });
+    }
     router.push(`/watch/${id}?ep=${ep}&mode=${mode}${show?.name ? `&title=${encodeURIComponent(show.name)}` : ""}`);
   }
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto pt-[80px] pb-8">
+      <div className="max-w-7xl mx-auto page-top pb-8">
         <div className="flex flex-col md:flex-row gap-6">
           <div className="w-full md:w-72 aspect-[3/4] rounded-lg bg-surface skeleton" />
           <div className="flex-1 space-y-4">
@@ -181,20 +211,24 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   if (!show) return (
-    <div className="max-w-7xl mx-auto pt-[80px] pb-8 text-center space-y-4">
-      <div className="mb-4">
-        <svg className="w-16 h-16 mx-auto text-text-secondary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-      <p className="text-text-muted font-medium">Anime not found</p>
-      <p className="text-text-secondary text-sm">This show might be unavailable or the ID is invalid.</p>
-      <button
-        onClick={() => setRetryKey((k) => k + 1)}
-        className="px-4 py-2 rounded-lg text-sm font-medium bg-surface hover:bg-surface-hover text-text-muted border border-border transition-colors btn-tap"
-      >
-        Try Again
-      </button>
+    <div className="max-w-7xl mx-auto page-top pb-8 text-center space-y-4">
+      <EmptyState
+        icon={
+          <svg className="h-16 w-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        }
+        title="Anime not found"
+        description="This show might be unavailable or the ID is invalid."
+        action={
+          <button
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="rounded-control border border-border bg-surface px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:bg-surface-hover btn-tap"
+          >
+            Try Again
+          </button>
+        }
+      />
     </div>
   );
 
@@ -213,7 +247,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
     resume && (show.availableEpisodesDetail?.[resume.mode] ?? []).map(Number).includes(resume.ep) ? resume : null;
 
   return (
-    <div className="max-w-7xl mx-auto pt-[80px] pb-6 space-y-8">
+    <div className="max-w-7xl mx-auto page-top pb-6 space-y-8">
       {/* Back button */}
       <button onClick={() => router.back()} className="text-text-muted hover:text-foreground transition-colors">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
@@ -311,15 +345,18 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Episodes */}
-      <section>
-        <div className="flex items-center gap-3 mb-4">
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Episodes</h2>
-          <span className="text-sm text-text-muted">{mode.toUpperCase()} &middot; {episodes.length} eps</span>
+          <span className="text-xs font-medium text-text-muted bg-surface border border-border rounded-full px-3 py-1 tabular-nums">
+            {mode.toUpperCase()} · {episodes.length} eps
+          </span>
         </div>
         <EpisodeList
           episodes={episodes}
           mode={mode}
           titles={titles}
+          watchedUpTo={watchedUpTo}
           onSelect={selectEpisode}
         />
       </section>
@@ -327,41 +364,19 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
       {/* Related: prequel/sequel/etc as a horizontal rail below the episodes. */}
       {relations.length > 0 && (
         <section aria-label="Related anime">
-          <h2 className="text-lg font-semibold mb-4">Related</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2">
-            {relations.map((r) => (
-              <Link
+          <SectionHeader title="Related" note="Sequels, prequels and spin-offs" />
+          <Rail itemCount={Math.min(relations.length, 12)}>
+            {relations.slice(0, 12).map((r) => (
+              <MediaCard
                 key={`${r.relation}-${r.id}`}
                 href={`/anime/${r.id}`}
-                className="group flex-shrink-0 w-32 md:w-36"
-                title={`${RELATION_LABELS[r.relation] ?? r.relation} — ${r.title}`}
-              >
-                <div className="relative aspect-[3/4] rounded-md overflow-hidden bg-surface">
-                  {r.thumbnail ? (
-                    <Image
-                      src={r.thumbnail}
-                      alt={r.title}
-                      fill
-                      sizes="(max-width: 768px) 128px, 144px"
-                      className="object-cover transition-transform duration-300 group-hover:scale-105"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-text-muted text-xs">No Image</div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-80 group-hover:opacity-100 transition-opacity" />
-                  <div className="absolute top-1.5 left-1.5">
-                    <span className="text-[9px] font-bold bg-accent/90 text-white px-1.5 py-0.5 rounded-full">
-                      {RELATION_LABELS[r.relation] ?? r.relation}
-                    </span>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 p-2">
-                    <p className="text-[11px] font-semibold text-white line-clamp-2 leading-tight">{r.title}</p>
-                  </div>
-                </div>
-              </Link>
+                title={r.title}
+                image={r.thumbnail}
+                meta={[RELATION_LABELS[r.relation] ?? r.relation]}
+                className="w-[168px] flex-shrink-0"
+              />
             ))}
-          </div>
+          </Rail>
         </section>
       )}
     </div>

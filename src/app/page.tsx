@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Search } from "lucide-react";
 import AnimeCard from "@/components/AnimeCard";
 import SpotlightCarousel from "@/components/SpotlightCarousel";
 import TrendingCarousel from "@/components/TrendingCarousel";
@@ -12,11 +13,15 @@ import ScheduleSection from "@/components/ScheduleSection";
 import MoviesSection from "@/components/MoviesSection";
 import ContinueWatchingMovies from "@/components/ContinueWatchingMovies";
 import MovieCard from "@/components/MovieCard";
+import EmptyState, { CardGridSkeleton } from "@/components/Skeleton";
 import type { SearchResult } from "@/lib/allanime";
 import type { MovieResult } from "@/lib/movies";
 
 const EMPTY_ANIME: SearchResult[] = [];
 const EMPTY_MOVIES: MovieResult[] = [];
+
+const PAGE = "mx-auto w-full px-6 md:px-10";
+const GRID = "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5";
 
 function HomeContent() {
   const searchParams = useSearchParams();
@@ -57,30 +62,21 @@ function HomeContent() {
   if (q) {
     if (isMovies) {
       return (
-        <div className="max-w-7xl mx-auto pt-[50px] pb-6 space-y-6">
-          <h1 className="text-lg font-semibold mt-4">
-            Movie results for &ldquo;{q}&rdquo; <span className="text-text-muted font-normal">({movieResults.length})</span>
+        <div className={`${PAGE} page-top space-y-5 pb-10`}>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {movieLoading ? "Searching…" : `Results for “${q}”`}
+            {!movieLoading && <span className="ml-2 text-sm font-normal text-text-secondary">{movieResults.length} titles</span>}
           </h1>
-          {movieLoading && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="aspect-[3/4] rounded-lg bg-surface skeleton" />
-              ))}
-            </div>
-          )}
+          {movieLoading && <CardGridSkeleton />}
           {!movieLoading && movieResults.length === 0 && (
-            <div className="text-center py-16 space-y-3">
-              <div className="text-4xl mb-4">
-                <svg className="w-12 h-12 mx-auto text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                </svg>
-              </div>
-              <p className="text-text-muted font-medium">No movies found for &ldquo;{q}&rdquo;</p>
-              <p className="text-text-secondary text-sm">Try different keywords or check your spelling</p>
-            </div>
+            <EmptyState
+              icon={<Search className="h-8 w-8" aria-hidden />}
+              title={`No titles found for “${q}”`}
+              description="Try a different spelling, or search for the original Japanese title."
+            />
           )}
           {!movieLoading && movieResults.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className={GRID}>
               {movieResults.map((m) => (
                 <MovieCard key={m.id} movie={m} />
               ))}
@@ -91,30 +87,21 @@ function HomeContent() {
     }
 
     return (
-      <div className="max-w-7xl mx-auto pt-[50px] pb-6 space-y-6">
-        <h1 className="text-lg font-semibold mt-4">
-          Search results for &ldquo;{q}&rdquo; <span className="text-text-muted font-normal">({animeResults.length})</span>
+      <div className={`${PAGE} page-top space-y-5 pb-10`}>
+        <h1 className="text-xl font-semibold tracking-tight">
+          {animeLoading ? "Searching…" : `Results for “${q}”`}
+          {!animeLoading && <span className="ml-2 text-sm font-normal text-text-secondary">{animeResults.length} titles</span>}
         </h1>
-        {animeLoading && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="aspect-[3/4] rounded-md bg-surface animate-pulse" />
-            ))}
-          </div>
-        )}
+        {animeLoading && <CardGridSkeleton />}
         {!animeLoading && animeResults.length === 0 && (
-          <div className="text-center py-16 space-y-3">
-            <div className="text-4xl mb-4">
-              <svg className="w-12 h-12 mx-auto text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <p className="text-text-muted font-medium">No anime found for &ldquo;{q}&rdquo;</p>
-            <p className="text-text-secondary text-sm">Try different keywords or check your spelling</p>
-          </div>
+          <EmptyState
+            icon={<Search className="h-8 w-8" aria-hidden />}
+            title={`No anime found for “${q}”`}
+            description="Try a different spelling, or search for the original Japanese title."
+          />
         )}
         {!animeLoading && animeResults.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className={GRID}>
             {animeResults.map((r) => (
               <AnimeCard
                 key={r._id}
@@ -142,14 +129,12 @@ function HomeContent() {
   }
 
   return (
-    <div className="space-y-0">
+    <div className="pb-16">
       <SpotlightCarousel />
 
-      <div className="py-8 space-y-10">
+      <div className={`${PAGE} relative z-10 -mt-8 space-y-14`}>
         <ContinueWatching />
-      </div>
 
-      <div className="py-8 space-y-10">
         <TrendingCarousel />
         <MostPopular />
         <TopRated />
@@ -161,7 +146,7 @@ function HomeContent() {
 
 export default function Home() {
   return (
-    <Suspense fallback={<div className="max-w-7xl mx-auto py-16 text-text-muted text-center">Loading...</div>}>
+    <Suspense fallback={<div className="mx-auto px-4 py-24 text-center text-sm text-text-muted">Loading…</div>}>
       <HomeContent />
     </Suspense>
   );

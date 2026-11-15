@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, notFound } from "next/navigation";
+import { Search } from "lucide-react";
 import AnimeCard from "@/components/AnimeCard";
 import MovieCard from "@/components/MovieCard";
+import EmptyState, { CardGridSkeleton } from "@/components/Skeleton";
 import { cachedFetch } from "@/lib/cache";
 import type { MovieResult } from "@/lib/movies";
 
@@ -108,20 +110,20 @@ export default function BrowsePage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto pt-[50px] pb-6 space-y-6">
-      <div className="flex items-center gap-3">
+    <div className="max-w-7xl mx-auto page-top pb-6 space-y-6">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Link href="/" className="text-text-muted hover:text-foreground transition-colors text-sm shrink-0">
           &larr; Home
         </Link>
-        <h1 className="text-lg font-semibold mt-4">
+        <h1 className="text-lg font-semibold">
           {meta.title}{" "}
           <span className="text-text-muted font-normal">({count ?? "…"})</span>
         </h1>
-        {meta.note && <span className="text-xs text-text-secondary mt-4">{meta.note}</span>}
+        {meta.note && <span className="text-xs text-text-secondary">{meta.note}</span>}
         {meta.kind === "movie" && (
           <button
             onClick={shuffleList}
-            className="ml-auto mt-4 px-3 py-1.5 rounded-full text-xs font-medium bg-surface border border-border text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors btn-tap flex items-center gap-1.5"
+            className="ml-auto rounded-chip border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-surface-hover hover:text-foreground btn-tap flex items-center gap-1.5"
             title="Random from this list"
             aria-label="Shuffle this list"
           >
@@ -130,22 +132,17 @@ export default function BrowsePage() {
           </button>
         )}
       </div>
-      {list === null && (
-        <div className={GRID}>
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="aspect-[3/4] rounded-md bg-surface animate-pulse" />
-          ))}
-        </div>
-      )}
+      {list === null && <CardGridSkeleton count={10} />}
       {list !== null && list.length === 0 && (
-        <div className="text-center py-16 space-y-3">
-          <p className="text-text-muted font-medium">No titles found</p>
-          <p className="text-text-secondary text-sm">The catalogue is temporarily unavailable — try again later</p>
-        </div>
+        <EmptyState
+          icon={<Search className="h-8 w-8" aria-hidden />}
+          title="No titles found"
+          description="The catalogue is temporarily unavailable — try again later."
+        />
       )}
       {meta.kind === "anime" && items !== null && items.length > 0 && (
         <div className={GRID}>
-          {items.map((s) => (
+          {items.map((s, i) => (
             <AnimeCard
               key={s._id}
               id={s._id}
@@ -155,17 +152,19 @@ export default function BrowsePage() {
               sub={s.availableEpisodes?.sub}
               dub={s.availableEpisodes?.dub}
               score={s.score ?? null}
+              rank={i + 1}
             />
           ))}
         </div>
       )}
       {meta.kind === "movie" && movies !== null && movies.length > 0 && (
         <div className={GRID}>
-          {movies.map((m) => (
+          {movies.map((m, i) => (
             <MovieCard
               key={m.id}
               movie={{ ...m, media_type: meta.mediaType ?? m.media_type }}
               showScore={meta.showScore}
+              rank={i + 1}
             />
           ))}
         </div>

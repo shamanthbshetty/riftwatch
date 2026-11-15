@@ -2,9 +2,42 @@
 
 import { useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { exportData, importData, getEpCache, refreshStore, subscribeStore } from "@/lib/storage";
-import { useWatchlistItems } from "@/lib/useWatchlists";
+import { exportData, importData, getEpCache, refreshStore, subscribeStore, setAutoplayPref, setSkipPref, setResumePref } from "@/lib/storage";
+import { useWatchlistItems, useAutoplayPref, useSkipPref, useResumePref } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
+
+function PlaybackRow({
+  title,
+  description,
+  checked,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-text-secondary">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={title}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-chip transition-colors ${checked ? "bg-accent" : "bg-surface-hover border border-border"}`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[20px]" : "translate-x-0"}`}
+        />
+      </button>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -13,6 +46,9 @@ export default function SettingsPage() {
   // useSyncExternalStore renders the server snapshot during hydration and swaps
   // to localStorage afterwards, so no "mounted" flag is needed here.
   const watchlist = useWatchlistItems();
+  const autoplay = useAutoplayPref();
+  const autoSkip = useSkipPref();
+  const resumePref = useResumePref();
   // "Tracking notifications" = ep-cache entries for shows still on the
   // watchlist. Going through the external store keeps the server snapshot (0)
   // and client snapshot aligned — reading getEpCache() directly in render gave
@@ -68,7 +104,7 @@ export default function SettingsPage() {
   const watchCount = watchlist.length;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-8">
+    <div className="max-w-2xl mx-auto page-top px-4 pb-10 space-y-8">
       {/* Header with back */}
       <div className="flex items-center gap-3">
         <button onClick={() => router.back()} className="text-text-muted hover:text-foreground transition-colors btn-tap">
@@ -114,6 +150,36 @@ export default function SettingsPage() {
             </button>
             <input ref={fileRef} type="file" accept=".json" onChange={handleImport} className="hidden" />
           </div>
+        </div>
+      </section>
+
+      {/* Playback */}
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" /></svg>
+          Playback
+        </h2>
+        <div className="bg-surface rounded-xl p-4 space-y-4 border border-border/50">
+          <PlaybackRow
+            title="Autoplay next episode"
+            description="Start the next episode automatically when one ends"
+            checked={autoplay}
+            onChange={setAutoplayPref}
+          />
+          <div className="border-t border-border/50" />
+          <PlaybackRow
+            title="Auto-skip openings & endings"
+            description="Jump past OP/ED when the source provides timestamps"
+            checked={autoSkip}
+            onChange={setSkipPref}
+          />
+          <div className="border-t border-border/50" />
+          <PlaybackRow
+            title="Resume where I left off"
+            description="Reopen episodes at the saved position instead of the start"
+            checked={resumePref}
+            onChange={setResumePref}
+          />
         </div>
       </section>
 

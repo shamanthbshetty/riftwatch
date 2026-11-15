@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::title_score;
+use crate::tmdb;
+
 const ANILIST_URL: &str = "https://graphql.anilist.co";
 const KITSU_MAP_URL: &str = "https://kitsu.io/api/edge/mappings";
 const KITSU_ANIME_URL: &str = "https://kitsu.io/api/edge/anime";
@@ -294,32 +297,101 @@ async fn mal_to_kitsu_id(client: &reqwest::Client, mal_id: &str) -> Option<Strin
         .map(String::from)
 }
 
-pub async fn get_episode_titles(client: &reqwest::Client, mal_id: &str) -> Result<Value, String> {
-    // Mirrors Next's 1h fetch cache; empty results stay uncached so a Kitsu
-    // outage isn't masked after it recovers.
-    let memo_key = format!("titles:{}", mal_id);
-    if let Some(hit) = memo_get(&memo_key, HOUR) {
-        if hit.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-            return Ok(hit);
+// Kitsu's MAL↔Kitsu mapping table has gaps (new/airing titles return
+// {"data":[]}), so MAL-id lookups come back empty for exactly the shows
+// people are watching right now. Match by name instead — episode titles are
+// only cosmetic, so a conservative exact/starts-with match threshold keeps a
+// near-miss (sequel/special) from donating the wrong titles.
+async fn kitsu_id_by_title(client: &reqwest::Client, title: &str) -> Option<String> {
+    let t = title.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let url = format!(
+        "{}?filter[text]={}&page[limit]=10",
+        KITSU_ANIME_URL,
+        urlencoding::encode(t)
+    );
+    let j = kitsu_get(client, &url, Duration::from_secs(8)).await.ok()?;
+    let data = j["data"].as_array()?;
+    let mut best: Option<(i32, String)> = None;
+    for d in data {
+        let attrs = &d["attributes"];
+        let mut candidates: Vec<&str> = Vec::new();
+        for v in [
+            attrs["canonicalTitle"].as_str(),
+            attrs["titles"]["en"].as_str(),
+            attrs["titles"]["en_jp"].as_str(),
+        ] {
+            if let Some(s) = v {
+                candidates.push(s);
+            }
+        }
+        if let Some(abbr) = attrs["abbreviatedTitles"].as_array() {
+            for a in abbr {
+                if let Some(s) = a.as_str() {
+                    candidates.push(s);
+                }
+            }
+        }
+        let score = candidates
+            .iter()
+            .map(|c| title_score::score_title(t, c))
+            .max()
+            .unwrap_or(0);
+        if score < 700 {
+            continue;
+        }
+        if let Some(id) = d["id"].as_str() {
+            if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                best = Some((score, id.to_string()));
+            }
         }
     }
-    let mut titles: Map<String, Value> = Map::new();
+    best.map(|(_, id)| id)
+}
 
-    if let Some(kitsu_id) = mal_to_kitsu_id(client, mal_id).await {
-        let mut offset: usize = 0;
-        while offset < 500 {
-            let url = format!(
-                "{}/{}/episodes?page[limit]=20&page[offset]={}&sort=number",
-                KITSU_ANIME_URL, kitsu_id, offset
-            );
-            let j = match kitsu_get(client, &url, Duration::from_secs(8)).await {
+async fn kitsu_episode_titles(
+    client: &reqwest::Client,
+    kitsu_id: &str,
+    titles: &mut Map<String, Value>,
+) {
+    // Parallel batches of pages: Kitsu paginates 20 eps at a time, so a
+    // 1000-episode show is 50 sequential round-trips. Fetching 8 pages per
+    // batch (160 eps) cuts the wall-clock time roughly 8x.
+    const PAGE: usize = 20;
+    const BATCH: usize = 8;
+    let mut offset: usize = 0;
+    while offset < 2000 {
+        let mut futs = Vec::with_capacity(BATCH);
+        for i in 0..BATCH {
+            let o = offset + i * PAGE;
+            let kitsu_id = kitsu_id.to_string();
+            futs.push(async move {
+                let url = format!(
+                    "{}/{}/episodes?page[limit]={}&page[offset]={}&sort=number",
+                    KITSU_ANIME_URL, kitsu_id, PAGE, o
+                );
+                kitsu_get(client, &url, Duration::from_secs(8)).await
+            });
+        }
+        let results = futures::future::join_all(futs).await;
+        let mut any_short = false;
+        let mut all_empty = true;
+        for r in results {
+            let j = match r {
                 Ok(j) => j,
-                Err(_) => break,
+                Err(_) => { any_short = true; continue; }
             };
             let data = match j["data"].as_array() {
                 Some(d) => d,
-                None => break,
+                None => { any_short = true; continue; }
             };
+            if data.is_empty() {
+                any_short = true;
+                continue;
+            }
+            all_empty = false;
             for ep in data {
                 let attrs = &ep["attributes"];
                 let name = attrs["canonicalTitle"]
@@ -343,46 +415,122 @@ pub async fn get_episode_titles(client: &reqwest::Client, mal_id: &str) -> Resul
                     titles.insert(s, json!(name));
                 }
             }
-            if data.len() < 20 {
-                break;
+            if data.len() < PAGE {
+                any_short = true;
             }
-            offset += 20;
+        }
+        if all_empty || any_short {
+            break;
+        }
+        offset += BATCH * PAGE;
+    }
+}
+
+// AniList's `streamingEpisodes` carries a title per episode for some shows —
+// a last-resort source for titles Kitsu and TMDB don't have.
+pub async fn ani_streaming_episode_titles(
+    client: &reqwest::Client,
+    mal_id: &str,
+    title: Option<&str>,
+) -> Map<String, Value> {
+    let mut out = Map::new();
+    let (query, variables) = if !mal_id.is_empty() {
+        (
+            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { streamingEpisodes { title episode } } }"#.to_string(),
+            json!({ "idMal": mal_id.parse::<i64>().unwrap_or(0) }),
+        )
+    } else if let Some(t) = title {
+        (
+            r#"query($search: String) { Media(search: $search, type: ANIME) { streamingEpisodes { title episode } } }"#.to_string(),
+            json!({ "search": t }),
+        )
+    } else {
+        return out;
+    };
+    let body = json!({ "query": query, "variables": variables });
+    let res = match client
+        .post("https://graphql.anilist.co")
+        .json(&body)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return out,
+    };
+    if !res.status().is_success() {
+        return out;
+    }
+    let j: Value = match res.json().await {
+        Ok(v) => v,
+        Err(_) => return out,
+    };
+    let media = &j["data"]["Media"];
+    if media.is_null() {
+        return out;
+    }
+    if let Some(eps) = media["streamingEpisodes"].as_array() {
+        for ep in eps {
+            let num = ep["episode"].as_i64();
+            let name = ep["title"].as_str().map(str::trim).filter(|s| !s.is_empty());
+            if let (Some(n), Some(name)) = (num, name) {
+                out.entry(n.to_string()).or_insert(json!(name));
+            }
+        }
+    }
+    out
+}
+
+pub async fn get_episode_titles(
+    client: &reqwest::Client,
+    mal_id: &str,
+    title: Option<&str>,
+) -> Result<Value, String> {
+    let title = title.map(|t| t.trim()).filter(|t| !t.is_empty());
+    // Mirrors Next's 1h fetch cache; empty results stay uncached so a Kitsu
+    // outage isn't masked after it recovers. Keyed by both inputs so the same
+    // show hit under different names doesn't collide.
+    let memo_key = format!("titles:{}:{}", mal_id, title.unwrap_or(""));
+    if let Some(hit) = memo_get(&memo_key, DAY_24) {
+        if hit.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+            return Ok(hit);
+        }
+    }
+    let mut titles: Map<String, Value> = Map::new();
+
+    if !mal_id.is_empty() {
+        if let Some(kitsu_id) = mal_to_kitsu_id(client, mal_id).await {
+            kitsu_episode_titles(client, &kitsu_id, &mut titles).await;
         }
     }
 
-    // Fallback: Jikan (MAL) episode list when Kitsu returned nothing.
+    // Fallback: match the Kitsu entry by name when the MAL mapping missed.
+    // (Jikan used to sit here but has been unreachable since Oct 2026.)
     if titles.is_empty() {
-        let mut page: usize = 1;
-        while page <= 10 {
-            let url = format!(
-                "https://api.jikan.moe/v4/anime/{}/episodes?page={}",
-                urlencoding::encode(mal_id),
-                page
-            );
-            let j = match kitsu_get(client, &url, Duration::from_secs(8)).await {
-                Ok(j) => j,
-                Err(_) => break,
-            };
-            if let Some(data) = j["data"].as_array() {
-                for ep in data {
-                    let name = ep["title"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .or_else(|| ep["title_japanese"].as_str().filter(|s| !s.is_empty()))
-                        .unwrap_or("");
-                    if name.is_empty() {
-                        continue;
-                    }
-                    if let Some(n) = ep["mal_id"].as_i64() {
-                        titles.insert(n.to_string(), json!(name));
-                    }
+        if let Some(t) = title {
+            if let Some(kitsu_id) = kitsu_id_by_title(client, t).await {
+                kitsu_episode_titles(client, &kitsu_id, &mut titles).await;
+            }
+        }
+    }
+
+    // TMDB fallback: fills gaps (and covers shows Kitsu never catalogued). Run
+    // unconditionally so long-running shows (One Piece, 1000+ eps) get titles
+    // for episodes beyond Kitsu's paginated window instead of only the first 500.
+    if let Some(t) = title {
+        if let Ok(m) = tmdb::episode_titles(client, t).await {
+            if let Some(obj) = m.as_object() {
+                for (k, v) in obj {
+                    titles.entry(k.clone()).or_insert(v.clone());
                 }
             }
-            if !j["pagination"]["has_next_page"].as_bool().unwrap_or(false) {
-                break;
-            }
-            page += 1;
         }
+    }
+
+    // AniList streamingEpisodes fallback — fills remaining gaps.
+    let ani = ani_streaming_episode_titles(client, mal_id, title).await;
+    for (k, v) in &ani {
+        titles.entry(k.clone()).or_insert(v.clone());
     }
 
     let out = Value::Object(titles);
@@ -607,7 +755,7 @@ pub async fn get_ani_hidden_gems(client: &reqwest::Client) -> Result<Vec<Value>,
 
 // ── Spotlight (ongoing/new anime with descriptions) ──
 
-const SPOTLIGHT_QUERY: &str = "query { Page(page: 1, perPage: 10) { media(status: RELEASING, type: ANIME, isAdult: false, sort: UPDATED_AT_DESC) { id idMal title { romaji english native } coverImage { large } trending popularity averageScore description status genres } } }";
+const SPOTLIGHT_QUERY: &str = "query { Page(page: 1, perPage: 10) { media(status: RELEASING, type: ANIME, isAdult: false, countryOfOrigin: \"JP\", sort: UPDATED_AT_DESC) { id idMal title { romaji english native } coverImage { large } trending popularity averageScore description status genres } } }";
 
 fn spotlight_row(m: &Value) -> Value {
     let english = m["title"]["english"].as_str().filter(|s| !s.is_empty());
@@ -678,7 +826,7 @@ fn kitsu_spotlight_row(d: &Value) -> Value {
 }
 
 pub async fn get_ani_spotlight(client: &reqwest::Client) -> Result<Vec<Value>, String> {
-    if let Some(hit) = memo_get("ani:spotlight", SIX_HOURS) {
+    if let Some(hit) = memo_get("ani:spotlight:v3", SIX_HOURS) {
         if let Some(arr) = hit.as_array() {
             return Ok(arr.clone());
         }
@@ -687,7 +835,7 @@ pub async fn get_ani_spotlight(client: &reqwest::Client) -> Result<Vec<Value>, S
         Ok(j) => {
             let media = j["data"]["Page"]["media"].as_array().cloned().unwrap_or_default();
             let out: Vec<Value> = media.iter().map(spotlight_row).collect();
-            memo_set("ani:spotlight", Value::Array(out.clone()));
+            memo_set("ani:spotlight:v3", Value::Array(out.clone()));
             Ok(out)
         }
         Err(_) => {

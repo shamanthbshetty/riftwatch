@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getResumePos, saveResumePos } from "@/lib/storage";
+import { useResumePref } from "@/lib/useWatchlists";
 import {
   Captions,
   Maximize,
@@ -27,6 +29,12 @@ interface VideoPlayerProps {
   // Legacy props kept for call-site compatibility
   storageKey?: string;
   nextLabel?: string;
+  /** Title of the following episode, shown on the up-next card. */
+  nextTitle?: string;
+  /** Advance to the next episode (up-next card + auto-advance countdown). */
+  onNext?: () => void;
+  /** Whether `onEnded` auto-advances (drives the countdown on the up-next card). */
+  autoAdvance?: boolean;
   skipIntro?: { start: number; end: number } | null;
   skipOutro?: { start: number; end: number } | null;
   autoSkip?: boolean;
@@ -96,11 +104,28 @@ export default function VideoPlayer({
   skipIntro,
   skipOutro,
   autoSkip,
+  storageKey,
+  nextLabel,
+  onNext,
+  nextTitle,
+  autoAdvance = false,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const resumePref = useResumePref();
+  const resumePrefRef = useRef(resumePref);
+  useEffect(() => { resumePrefRef.current = resumePref; }, [resumePref]);
+  const storageKeyRef = useRef(storageKey);
+  useEffect(() => { storageKeyRef.current = storageKey; }, [storageKey]);
+  const lastSaveRef = useRef(0);
+  const restoredRef = useRef(false);
+  useEffect(() => { restoredRef.current = false; }, [src]);
   const barRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
+  const onNextRef = useRef(onNext);
+  useEffect(() => { onNextRef.current = onNext; }, [onNext]);
+  const [upNextDismissed, setUpNextDismissed] = useState(false);
+  const [nextCountdown, setNextCountdown] = useState<number | null>(null);
 
   /* ------- media plumbing refs (same rationale as before: the ONLY
      re-setup triggers are src + subtitle list identity) ------- */
@@ -457,6 +482,16 @@ export default function VideoPlayer({
 
     const pushTime = () => {
       if (!scrubRef.current) setCurrentTime(v.currentTime);
+      // Throttled resume-position save (every 5s) so a refresh/crash mid-episode
+      // still lets "Continue Watching" reopen at the right spot.
+      const key = storageKeyRef.current;
+      if (key) {
+        const now = Date.now();
+        if (now - lastSaveRef.current >= 5000) {
+          lastSaveRef.current = now;
+          saveResumePos(key, v.currentTime, v.duration);
+        }
+      }
     };
     const pushDur = () => {
       if (Number.isFinite(v.duration)) {
@@ -474,7 +509,27 @@ export default function VideoPlayer({
       }
     };
     const onPlay = () => { setPlaying(true); };
-    const onPause = () => { setPlaying(false); setControlsOn(true); };
+    const onPause = () => {
+      setPlaying(false);
+      setControlsOn(true);
+      const key = storageKeyRef.current;
+      if (key) saveResumePos(key, v.currentTime, v.duration);
+    };
+    // Restore the saved position once per source, the first time metadata
+    // becomes available. Reset on src change so each episode seeks to its own
+    // saved spot.
+    const onLoadedMetaRestore = () => {
+      if (restoredRef.current) return;
+      const key = storageKeyRef.current;
+      if (!key || !resumePrefRef.current) { restoredRef.current = true; return; }
+      const saved = getResumePos(key);
+      // Don't resume inside the last 30s — the credits would roll immediately.
+      const end = (v.duration || Infinity) - 30;
+      if (saved > 10 && Number.isFinite(saved) && saved < end) {
+        try { v.currentTime = saved; } catch { /* ignore */ }
+      }
+      restoredRef.current = true;
+    };
     const onWaiting = () => setBuffering(true);
     const onReady = () => setBuffering(false);
     const onRate = () => setSpeed(v.playbackRate);
@@ -483,6 +538,7 @@ export default function VideoPlayer({
 
     v.addEventListener("timeupdate", pushTime);
     v.addEventListener("seeked", pushTime);
+    v.addEventListener("loadedmetadata", onLoadedMetaRestore);
     v.addEventListener("durationchange", pushDur);
     v.addEventListener("loadedmetadata", pushDur);
     v.addEventListener("progress", pushBuffered);
@@ -507,6 +563,7 @@ export default function VideoPlayer({
       cancelAnimationFrame(raf);
       v.removeEventListener("timeupdate", pushTime);
       v.removeEventListener("seeked", pushTime);
+      v.removeEventListener("loadedmetadata", onLoadedMetaRestore);
       v.removeEventListener("durationchange", pushDur);
       v.removeEventListener("loadedmetadata", pushDur);
       v.removeEventListener("progress", pushBuffered);
@@ -773,6 +830,25 @@ export default function VideoPlayer({
 
   const controlsVisible = controlsOn || !playing;
 
+  /* ------- up-next card (last 8% of the episode) ------- */
+  const nearEnd = durationSafe > 0 && currentTime / durationSafe >= 0.92;
+  const showUpNext = !!onNext && nearEnd && !upNextDismissed;
+  const autoNext = !!onEnded && autoAdvance;
+
+  useEffect(() => {
+    if (!showUpNext || !autoNext) return;
+    let left = 10;
+    const id = setInterval(() => {
+      left -= 1;
+      setNextCountdown(left);
+      if (left <= 0) {
+        clearInterval(id);
+        onNextRef.current?.();
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [showUpNext, autoNext]);
+
   /* ------------------------------ render ------------------------------ */
   return (
     <div
@@ -976,6 +1052,41 @@ export default function VideoPlayer({
         </div>
       )}
 
+      {/* up-next card — appears for the last 8%, never covers the controls */}
+      {showUpNext && (
+        <div className="absolute bottom-[92px] right-3 z-30 w-[260px] animate-fade-in-up rounded-surface border border-white/15 bg-black/80 p-3 backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <p className="text-2xs font-semibold uppercase tracking-wider text-white/55">
+              {autoNext ? "Up next" : "Next episode"}
+            </p>
+            <button
+              onClick={() => setUpNextDismissed(true)}
+              aria-label="Dismiss up-next card"
+              className="rounded p-0.5 text-white/50 transition-colors hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+          <p className="mt-1 line-clamp-2 text-sm font-semibold leading-snug text-white">
+            {nextTitle || nextLabel || "Next episode"}
+          </p>
+          <div className="mt-2.5 flex items-center gap-2">
+            <button
+              onClick={() => onNextRef.current?.()}
+              className="inline-flex items-center gap-1.5 rounded-control bg-white px-2.5 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-white/85"
+            >
+              <Play className="h-3 w-3 fill-black" aria-hidden />
+              Play now
+            </button>
+            {autoNext && (
+              <span className="text-2xs tabular-nums text-white/55">
+                in {nextCountdown ?? 10}s
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* control bar */}
       <div
         className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 pb-2 pt-8 transition-opacity duration-200 ${
@@ -1014,6 +1125,31 @@ export default function VideoPlayer({
                 }`}
               />
             </div>
+            {/* skip-interval markers (intro / outro) */}
+            {durationSafe > 0 && (
+              <>
+                {skipIntro && skipIntro.start >= 0 && skipIntro.end > skipIntro.start && (
+                  <div
+                    className="absolute inset-y-0 rounded-full bg-amber-400/45 ring-1 ring-amber-400/70 pointer-events-none"
+                    style={{
+                      left: `${(skipIntro.start / durationSafe) * 100}%`,
+                      width: `${((skipIntro.end - skipIntro.start) / durationSafe) * 100}%`,
+                    }}
+                    title={`Intro: ${fmtTime(skipIntro.start)}–${fmtTime(skipIntro.end)}`}
+                  />
+                )}
+                {skipOutro && skipOutro.start >= 0 && skipOutro.end > skipOutro.start && (
+                  <div
+                    className="absolute inset-y-0 rounded-full bg-violet-400/45 ring-1 ring-violet-400/70 pointer-events-none"
+                    style={{
+                      left: `${(skipOutro.start / durationSafe) * 100}%`,
+                      width: `${((skipOutro.end - skipOutro.start) / durationSafe) * 100}%`,
+                    }}
+                    title={`Outro: ${fmtTime(skipOutro.start)}–${fmtTime(skipOutro.end)}`}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* hover/drag time tooltip */}

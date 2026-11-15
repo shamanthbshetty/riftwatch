@@ -44,6 +44,28 @@
   --color-badge-dub: var(--badge-dub);
   --font-sans: 'Satoshi', system-ui, -apple-system, sans-serif;
   --font-display: 'Clash Display', 'Satoshi', system-ui, sans-serif;
+
+  /* Type scale addition — 11px meta text replaces the [9px]/[10px]/[11px]
+     one-offs. The rest of the ramp is Tailwind's default. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Radii — surfaces, controls, chips. Nothing else. */
+  --radius-surface: 10px;
+  --radius-control: 8px;
+  --radius-chip: 999px;
+}
+
+/* Layout metrics — derived from the floating nav so pages stop drifting. */
+:root {
+  --nav-h: 76px;
+  --page-top: calc(var(--nav-h) + 20px);
+  --gutter: 24px;
+  --section-gap: 56px;
+}
+
+@utility page-top {
+  padding-top: var(--page-top);
 }
 
 body {
@@ -72,34 +94,38 @@ h1, h2, h3, h4, h5, h6 {
 
 .carousel-scroll {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   overflow-x: auto;
   overflow-y: visible;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
-  padding: 40px 0 20px 56px;
-  margin-left: -16px;
+  padding: 18px 0 6px;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 .carousel-scroll::-webkit-scrollbar { display: none; }
-.carousel-scroll > * { scroll-snap-align: start; }
+.carousel-scroll img { -webkit-user-drag: none; user-drag: none; pointer-events: none; -webkit-user-select: none; user-select: none; }
+.carousel-scroll a { -webkit-user-drag: none; user-drag: none; }
 
-/* Card hover: subtle lift, composite-friendly. Hover motion is gated to
-   pointer devices — touch would otherwise stick the card in its raised
-   state after a tap. will-change deliberately omitted: the browser already
-   promotes transform-animated elements, and one layer per card across a
-   full page of rails costs real GPU memory. */
+/* Card hover: one motion signature — a 2px lift and a hairline highlight.
+   The poster inside does NOT scale too (double-zoom read as a toy). Shadow is
+   short and close, not a 48px black cloud. */
 .card-hover {
   position: relative;
-  border-radius: 0.375rem;
-  transition: transform 250ms var(--ease-out), box-shadow 250ms ease;
+  border-radius: var(--radius-surface);
+  transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out), border-color 200ms var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
   .card-hover:hover {
-    transform: scale(1.05) translateY(-4px);
-    z-index: 20;
-    box-shadow: 0 24px 48px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.22);
+    transform: translateY(-2px);
+    box-shadow: 0 14px 28px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.16);
   }
+}
+
+/* One focus treatment for every interactive element. */
+:where(a, button, [role="button"], input, select, textarea, summary):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
 }
 
 /* === Animations === */

@@ -3,9 +3,11 @@
 // Plain HTTP on purpose: api.themoviedb.org's TLS handshake is being reset at
 // the network level from some networks; the key is public anyway.
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::OnceLock;
 use std::time::Duration;
+
+use crate::title_score;
 
 const TMDB_BASE: &str = "http://api.themoviedb.org/3";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -222,4 +224,110 @@ pub async fn get_top_rated_movies() -> Result<Vec<Value>, String> {
 pub async fn get_top_rated_tv() -> Result<Vec<Value>, String> {
     let data = top_rated(shared_client(), "tv").await?;
     Ok(results(&data))
+}
+
+// ── Anime episode titles (fallback when Kitsu has none) ──
+
+/// Find the TMDB TV id whose English/original title matches `title`
+/// (exact/starts-with level — the same conservative threshold the provider
+/// search uses, so a sequel can't donate its titles to the wrong show).
+async fn tv_id_by_title(client: &reqwest::Client, title: &str) -> Option<u64> {
+    let t = title.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let data = tmdb_fetch(
+        client,
+        "/search/tv",
+        &[("query", t.to_string()), ("include_adult", "false".to_string())],
+    )
+    .await
+    .ok()?;
+    let mut best: Option<(i32, u64)> = None;
+    for r in results(&data) {
+        let mut score = 0;
+        for cand in [r["name"].as_str(), r["original_name"].as_str()] {
+            if let Some(c) = cand {
+                score = score.max(title_score::score_title(t, c));
+            }
+        }
+        if score < 700 {
+            continue;
+        }
+        let id = r["id"].as_i64()?;
+        if id > 0 && best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+            best = Some((score, id as u64));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// English episode titles keyed by ABSOLUTE episode number (the numbering the
+/// app and MAL use). Seasons are walked in ascending order and the first title
+/// for a number wins: TMDB sometimes splits one long anime across several
+/// "seasons" that all restart at episode 1, and renumbering those would shift
+/// every title onto the wrong episode.
+pub async fn episode_titles(client: &reqwest::Client, title: &str) -> Result<Value, String> {
+    let mut out = Map::new();
+    let id = match tv_id_by_title(client, title).await {
+        Some(id) => id,
+        None => return Ok(Value::Object(out)),
+    };
+    let details = tmdb_fetch(client, &format!("/tv/{}", id), &[]).await?;
+    let mut seasons: Vec<u64> = details["seasons"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| {
+                    let n = s["season_number"].as_f64()?;
+                    // Season 0 = specials; counting/using them shifts numbering.
+                    if n <= 0.0 {
+                        None
+                    } else {
+                        Some(n as u64)
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    seasons.sort_unstable();
+    seasons.dedup();
+    // Fetch all seasons in parallel, but apply results in ascending season
+    // order so "first title for a number wins" stays deterministic.
+    let mut season_data: Vec<(u64, Value)> = Vec::with_capacity(seasons.len());
+    let mut futs = Vec::with_capacity(seasons.len());
+    for &season in &seasons {
+        let url = format!("/tv/{}/season/{}", id, season);
+        futs.push(async move {
+            let data = tmdb_fetch(client, &url, &[]).await.ok();
+            (season, data.unwrap_or(Value::Null))
+        });
+    }
+    let results = futures::future::join_all(futs).await;
+    for (season, data) in results {
+        season_data.push((season, data));
+    }
+    season_data.sort_by_key(|(s, _)| *s);
+    for (_, data) in season_data {
+        let eps = match data["episodes"].as_array() {
+            Some(e) => e,
+            None => continue,
+        };
+        for ep in eps {
+            let name = match ep["name"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(n) => n,
+                None => continue,
+            };
+            let num = match ep["episode_number"].as_i64() {
+                Some(n) => n,
+                None => continue,
+            };
+            out.entry(num.to_string()).or_insert(json!(name));
+        }
+    }
+    Ok(Value::Object(out))
 }

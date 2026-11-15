@@ -11,7 +11,7 @@ import {
   storeSignature,
   type AppNotification,
 } from "@/lib/storage";
-import { useNotifications, useTheme } from "@/lib/useWatchlists";
+import { useNotifications, useTheme, useContinueWatching, useContinueWatchingMovies } from "@/lib/useWatchlists";
 import type { SearchResult } from "@/lib/allanime";
 import type { MovieResult } from "@/lib/movies";
 
@@ -63,8 +63,7 @@ export default function Nav() {
   }
 
   // Search overlay state
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);  const [q, setQ] = useState("");
   const [animeSuggestions, setAnimeSuggestions] = useState<SearchResult[]>([]);
   const [movieSuggestions, setMovieSuggestions] = useState<MovieResult[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -80,6 +79,57 @@ export default function Nav() {
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
+
+  // Command palette actions (Ctrl+K overlay, shown under an empty query).
+  const continueAnime = useContinueWatching();
+  const continueMovies = useContinueWatchingMovies();
+
+  type Command = { id: string; label: string; hint?: string; run: () => void };
+
+  const resumeTarget = (() => {
+    if (isMovies) {
+      const m = continueMovies[0];
+      if (!m) return null;
+      return {
+        label: `EP ${m.episode ?? 1}`,
+        href: `/movies/${m.id}/watch?type=${m.type}${m.season ? `&season=${m.season}&episode=${m.episode}` : ""}`,
+      };
+    }
+    const a = continueAnime[0];
+    if (!a) return null;
+    return {
+      label: `EP ${a.ep} · ${a.mode.toUpperCase()}`,
+      href: `/watch/${a.id}?ep=${a.ep}&mode=${a.mode}${a.title ? `&title=${encodeURIComponent(a.title)}` : ""}`,
+    };
+  })();
+
+  const close = () => setSearchOpen(false);
+
+  const commands: Command[] = [
+    ...(resumeTarget
+      ? [{
+          id: "resume",
+          label: "Resume watching",
+          hint: resumeTarget.label,
+          run: () => { close(); router.push(resumeTarget.href); },
+        }]
+      : []),
+    {
+      id: "random",
+      label: isMovies ? "Random movie or show" : "Random anime",
+      hint: "Shuffle",
+      run: () => { close(); shuffleRandom(); },
+    },
+    { id: "watchlist", label: "My watchlist", run: () => { close(); router.push(`/watchlist?tab=${tab}`); } },
+    { id: "history", label: "Watch history", run: () => { close(); router.push("/history"); } },
+    {
+      id: "theme",
+      label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
+      hint: "Theme",
+      run: () => { close(); toggleTheme(); },
+    },
+    { id: "settings", label: "Settings", run: () => { close(); router.push("/settings"); } },
+  ];
 
   // Notifications are polled for changes; refreshing the store re-renders
   // subscribers without any setState inside the effect body. Gated on the
@@ -190,12 +240,19 @@ export default function Nav() {
 
   function onSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const recentActive = !q.trim() && recentSearches.length > 0 && activeIdx >= 0 && activeIdx < recentSearches.length;
-    if (recentActive) {
-      const r = recentSearches[activeIdx];
-      setSearchOpen(false);
-      setActiveIdx(-1);
-      router.push(`/?tab=${r.tab}&q=${encodeURIComponent(r.q)}`);
+    if (!q.trim()) {
+      // Index space: commands, then recent searches.
+      if (activeIdx >= 0 && activeIdx < commands.length) {
+        commands[activeIdx].run();
+        return;
+      }
+      const ri = activeIdx - commands.length;
+      if (ri >= 0 && ri < recentSearches.length) {
+        const r = recentSearches[ri];
+        setSearchOpen(false);
+        setActiveIdx(-1);
+        router.push(`/?tab=${r.tab}&q=${encodeURIComponent(r.q)}`);
+      }
       return;
     }
     if (activeIdx >= 0 && activeIdx < suggestions.length) { selectItem(activeIdx); return; }
@@ -207,8 +264,14 @@ export default function Nav() {
     }
   }
 
+  // Empty query: quick actions first, then recent searches. Both are keyboard
+  // navigable with the same index so ArrowDown/Enter work across the two.
+  const actionList = !q.trim() && !suggestionsOpen
+    ? [...commands.map((c) => ({ id: c.id, label: c.label })), ...recentSearches.map((r) => ({ id: r.q, label: r.q }))]
+    : [];
+
   function onSearchKeyDown(e: React.KeyboardEvent) {
-    const list = suggestionsOpen && suggestions.length > 0 ? suggestions : (!q.trim() && recentSearches.length > 0 ? recentSearches.map((r) => ({ id: r.q, label: r.q })) : []);
+    const list = suggestionsOpen && suggestions.length > 0 ? suggestions : actionList;
     if (list.length === 0) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => (i + 1) % list.length); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => (i - 1 + list.length) % list.length); }
@@ -496,49 +559,73 @@ export default function Nav() {
                 </div>
               )}
 
-              {!suggestionsOpen && !q.trim() && recentSearches.length > 0 && (
+              {!suggestionsOpen && !q.trim() && (commands.length > 0 || recentSearches.length > 0) && (
                 <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-2xl overflow-hidden shadow-2xl shadow-black/40 z-50 animate-menu-in origin-top">
-                  <div className="flex items-center justify-between px-4 pt-3 pb-1">
-                    <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wide">Recent</span>
-                    <button type="button" onClick={clearRecentSearches} className="text-[11px] text-text-secondary hover:text-accent transition-colors">Clear</button>
-                  </div>
-                  {recentSearches.map((r, i) => (
-                    <div
-                      key={`${r.tab}-${r.q}-${i}`}
-                      onMouseEnter={() => setActiveIdx(i)}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 transition-colors ${i === activeIdx ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
-                    >
-                      <button
-                        type="button"
-                        onMouseDown={() => { setSearchOpen(false); router.push(`/?tab=${r.tab}&q=${encodeURIComponent(r.q)}`); }}
-                        className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                      >
-                        {r.thumb ? (
-                          <div className="relative w-8 h-11 rounded-md overflow-hidden bg-background flex-shrink-0">
-                            <Image
-                              src={r.tab === "movies" ? `https://image.tmdb.org/t/p/w92${r.thumb}` : r.thumb}
-                              alt="" fill className="object-cover" unoptimized
-                            />
-                          </div>
-                        ) : (
-                          <svg className="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        )}
-                        <span className="text-sm text-foreground truncate">{r.q}</span>
-                        <span className="text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded-full flex-shrink-0">{r.tab}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => { e.stopPropagation(); removeRecentSearch(i); }}
-                        className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-surface transition-colors flex-shrink-0"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
+                  {commands.length > 0 && (
+                    <div className="p-2">
+                      <p className="px-2 pb-1 text-[11px] font-medium text-text-secondary uppercase tracking-wide">Actions</p>
+                      {commands.map((c, i) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={c.run}
+                          onMouseEnter={() => setActiveIdx(i)}
+                          className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors ${i === activeIdx ? "bg-surface-hover text-foreground" : "text-text-muted hover:bg-surface-hover hover:text-foreground"}`}
+                        >
+                          <span className="truncate">{c.label}</span>
+                          {c.hint && <span className="shrink-0 text-[10px] text-text-secondary">{c.hint}</span>}
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  {recentSearches.length > 0 && (
+                    <div className={`p-2 ${commands.length > 0 ? "border-t border-border" : ""}`}>
+                      <div className="flex items-center justify-between px-2 pb-1">
+                        <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wide">Recent</span>
+                        <button type="button" onClick={clearRecentSearches} className="text-[11px] text-text-secondary hover:text-accent transition-colors">Clear</button>
+                      </div>
+                      {recentSearches.map((r, i) => {
+                        const idx = commands.length + i;
+                        return (
+                        <div
+                          key={`${r.tab}-${r.q}-${i}`}
+                          onMouseEnter={() => setActiveIdx(idx)}
+                          className={`w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-colors ${idx === activeIdx ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
+                        >
+                          <button
+                            type="button"
+                            onMouseDown={() => { setSearchOpen(false); router.push(`/?tab=${r.tab}&q=${encodeURIComponent(r.q)}`); }}
+                            className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                          >
+                            {r.thumb ? (
+                              <div className="relative w-8 h-11 rounded-md overflow-hidden bg-background flex-shrink-0">
+                                <Image
+                                  src={r.tab === "movies" ? `https://image.tmdb.org/t/p/w92${r.thumb}` : r.thumb}
+                                  alt="" fill className="object-cover" unoptimized
+                                />
+                              </div>
+                            ) : (
+                              <svg className="w-4 h-4 text-text-secondary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            )}
+                            <span className="text-sm text-foreground truncate">{r.q}</span>
+                            <span className="text-[10px] text-text-secondary bg-background px-1.5 py-0.5 rounded-full flex-shrink-0">{r.tab}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => { e.stopPropagation(); removeRecentSearch(i); }}
+                            className="p-1 rounded-md text-text-secondary hover:text-accent hover:bg-surface transition-colors flex-shrink-0"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </form>
@@ -547,6 +634,11 @@ export default function Nav() {
               <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-[10px] font-mono">ESC</kbd> to close
               <span className="mx-2 text-border">|</span>
               <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-[10px] font-mono">Ctrl K</kbd> to search
+              <span className="mx-2 text-border">|</span>
+              <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-[10px] font-mono">↑ ↓</kbd>
+              <span className="mx-1">to move</span>
+              <kbd className="px-1.5 py-0.5 bg-surface border border-border rounded text-[10px] font-mono">↵</kbd>
+              <span className="ml-1">to run</span>
             </p>
           </div>
         </div>

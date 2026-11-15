@@ -158,7 +158,14 @@ fn avail_detail(s: &Value) -> AvailDetail {
 fn show_from_allanime(s: &Value, fallback_id: &str) -> ShowDetail {
     ShowDetail {
         id: s["_id"].as_str().unwrap_or(fallback_id).to_string(),
-        name: s["name"].as_str().unwrap_or("").to_string(),
+        // Prefer the English title so abbreviated AllAnime names (e.g. "1P")
+        // don't leak into the UI; fall back to the raw name when absent.
+        name: s["englishName"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .or_else(|| s["name"].as_str())
+            .unwrap_or("")
+            .to_string(),
         english_name: s["englishName"].as_str().map(String::from),
         thumbnail: s["thumbnail"].as_str().unwrap_or("").to_string(),
         description: strip_html(s["description"].as_str().unwrap_or("")),
@@ -188,7 +195,11 @@ async fn avail_by_allanime_id(client: &reqwest::Client, show_id: &str) -> Option
 /// AniList's `episodes` is null for still-airing shows, so a count-derived list
 /// comes back empty even though providers already have released episodes. Ask
 /// AllAnime (by title search) for the real per-episode ids first.
-async fn avail_by_allanime_name(client: &reqwest::Client, name: &str) -> Option<AvailDetail> {
+/// Also returns the AllAnime id so callers can publish the CANONICAL show id
+/// regardless of which id namespace the request arrived in.
+struct AllanimeMatch { id: String, detail: AvailDetail }
+
+async fn avail_by_allanime_name(client: &reqwest::Client, name: &str) -> Option<AllanimeMatch> {
     if name.trim().is_empty() { return None; }
     let lower = name.trim().to_lowercase();
     let gid = search_anime(client, name).await.into_iter().find_map(|r| {
@@ -197,7 +208,7 @@ async fn avail_by_allanime_name(client: &reqwest::Client, name: &str) -> Option<
         let rl = rn.to_lowercase();
         if rl.contains(&lower) || lower.contains(&rl) { r["_id"].as_str().map(String::from) } else { None }
     })?;
-    avail_by_allanime_id(client, &gid).await
+    Some(AllanimeMatch { id: gid.clone(), detail: avail_by_allanime_id(client, &gid).await? })
 }
 
 async fn resolve_anilist_by_id(client: &reqwest::Client, anilist_id: &str) -> Option<ShowDetail> {
@@ -221,11 +232,15 @@ async fn resolve_anilist_by_id(client: &reqwest::Client, anilist_id: &str) -> Op
                             sub: (1..=ep_count).map(|i| i.to_string()).collect(),
                             dub: (1..=ep_count).map(|i| i.to_string()).collect(),
                         };
+                        // Canonical (AllAnime) id, so a watchlist entry written
+                        // from any id namespace resolves on every route.
+                        let mut show_id = anilist_id.to_string();
                         if let Some(aa) = avail_by_allanime_name(client, &name).await {
-                            detail = aa;
+                            show_id = aa.id;
+                            detail = aa.detail;
                         }
                         return Some(ShowDetail {
-                            id: anilist_id.to_string(),
+                            id: show_id,
                             name,
                             english_name: title["english"].as_str().map(String::from),
                             thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
@@ -261,11 +276,13 @@ async fn resolve_title_fallback(client: &reqwest::Client, title: &str) -> Option
                         sub: (1..=ep_count).map(|i| i.to_string()).collect(),
                         dub: (1..=ep_count).map(|i| i.to_string()).collect(),
                     };
+                    let mut show_id = String::new();
                     if let Some(aa) = avail_by_allanime_name(client, title_name).await {
-                        detail = aa;
+                        show_id = aa.id;
+                        detail = aa.detail;
                     }
                     return Some(ShowDetail {
-                        id: String::new(),
+                        id: show_id,
                         name: title_name.to_string(),
                         english_name: media["title"]["english"].as_str().map(String::from),
                         thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
@@ -349,7 +366,9 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl 
     if show.is_none() {
         if let Some(t) = &title_param {
             if let Some(mut s) = resolve_title_fallback(&state.http, t).await {
-                s.id = id.clone();
+                // AllAnime id when the title matched one, else the request id
+                // (the client's "not found" test requires a non-empty _id).
+                if s.id.is_empty() { s.id = id.clone(); }
                 show = Some(s);
             }
         }

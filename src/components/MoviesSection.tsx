@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
 import type { MovieResult } from "@/lib/movies";
 import { cachedFetch } from "@/lib/cache";
 import MovieCard from "./MovieCard";
 import MovieSpotlightCarousel from "./MovieSpotlightCarousel";
 import Rail from "./Rail";
 import RailSkeleton from "./RailSkeleton";
+import SectionHeader from "./SectionHeader";
 
 interface TrendingData {
   movies: MovieResult[];
@@ -19,15 +19,7 @@ interface TopRatedData {
   tv: { results: MovieResult[] };
 }
 
-function RankBadge({ rank }: { rank: number }) {
-  return (
-    <div className="absolute top-1.5 left-1.5 z-10">
-      <span className="text-[10px] font-bold bg-accent/90 text-white px-1.5 py-0.5 rounded-full">
-        {String(rank).padStart(2, "0")}
-      </span>
-    </div>
-  );
-}
+const RAIL_CARD = "w-[168px] flex-shrink-0";
 
 export default function MoviesSection({ children }: { children?: ReactNode }) {
   const [trending, setTrending] = useState<TrendingData | null>(null);
@@ -46,58 +38,47 @@ export default function MoviesSection({ children }: { children?: ReactNode }) {
       .finally(() => setTopLoading(false));
   }, []);
 
+  const rail = (items: MovieResult[], mediaType: "movie" | "tv", showScore?: boolean) => (
+    <Rail itemCount={Math.min(items.length, 8)}>
+      {items.slice(0, 8).map((m, i) => (
+        <MovieCard
+          key={m.id}
+          movie={{ ...m, media_type: mediaType }}
+          showScore={showScore}
+          rank={showScore ? undefined : i + 1}
+          className={RAIL_CARD}
+        />
+      ))}
+    </Rail>
+  );
+
   return (
-    <div className="space-y-10">
-      {/* Spotlight carousel — same as anime section */}
+    <div className="pb-16">
       <MovieSpotlightCarousel />
 
-      {/* Children (search bar, continue watching) rendered after spotlight */}
-      {children && (
-        <div className="space-y-10">
-          {children}
-        </div>
-      )}
+      <div className="mx-auto w-full space-y-14 px-6 md:px-10">
+        {children}
 
-      <div className="py-8 space-y-10">
-        {/* Trending Movies + TV */}
         {trendingLoading && (
           <>
             <RailSkeleton />
             <RailSkeleton />
           </>
         )}
+
         {!trendingLoading && trending?.movies && trending.movies.length > 0 && (
           <section>
-            <Link href="/browse/movies-trending">
-              <h2 className="text-lg font-semibold mb-4 section-title pl-10 pr-4 md:pl-10 md:pr-8 hover:text-accent transition-colors">Trending Movies</h2>
-            </Link>
-            <Rail itemCount={Math.min(trending.movies.length, 7)}>
-              {trending.movies.slice(0, 7).map((m, i) => (
-                <div key={m.id} className="relative flex-shrink-0 w-[180px]">
-                  <RankBadge rank={i + 1} />
-                  <MovieCard movie={m} />
-                </div>
-              ))}
-            </Rail>
+            <SectionHeader title="Trending Movies" href="/browse/movies-trending" />
+            {rail(trending.movies, "movie")}
           </section>
         )}
         {!trendingLoading && trending?.tv && trending.tv.length > 0 && (
           <section>
-            <Link href="/browse/tv-trending">
-              <h2 className="text-lg font-semibold mb-4 section-title pl-10 pr-4 md:pl-10 md:pr-8 hover:text-accent transition-colors">Trending TV Shows</h2>
-            </Link>
-            <Rail itemCount={Math.min(trending.tv.length, 7)}>
-              {trending.tv.slice(0, 7).map((m, i) => (
-                <div key={m.id} className="relative flex-shrink-0 w-[180px]">
-                  <RankBadge rank={i + 1} />
-                  <MovieCard movie={{ ...m, media_type: "tv" }} />
-                </div>
-              ))}
-            </Rail>
+            <SectionHeader title="Trending TV Shows" href="/browse/tv-trending" />
+            {rail(trending.tv, "tv")}
           </section>
         )}
 
-        {/* Top Rated Movies + TV */}
         {topLoading && (
           <>
             <RailSkeleton />
@@ -106,30 +87,14 @@ export default function MoviesSection({ children }: { children?: ReactNode }) {
         )}
         {!topLoading && topRated?.movies?.results && topRated.movies.results.length > 0 && (
           <section>
-            <Link href="/browse/movies-top">
-              <h2 className="text-lg font-semibold mb-4 section-title pl-10 pr-4 md:pl-10 md:pr-8 hover:text-accent transition-colors">Top Rated Movies</h2>
-            </Link>
-            <Rail itemCount={Math.min(topRated.movies.results.length, 7)}>
-              {topRated.movies.results.slice(0, 7).map((m) => (
-                <div key={m.id} className="flex-shrink-0 w-[180px]">
-                  <MovieCard movie={{ ...m, media_type: "movie" }} showScore />
-                </div>
-              ))}
-            </Rail>
+            <SectionHeader title="Top Rated Movies" href="/browse/movies-top" />
+            {rail(topRated.movies.results, "movie", true)}
           </section>
         )}
         {!topLoading && topRated?.tv?.results && topRated.tv.results.length > 0 && (
           <section>
-            <Link href="/browse/tv-top">
-              <h2 className="text-lg font-semibold mb-4 section-title pl-10 pr-4 md:pl-10 md:pr-8 hover:text-accent transition-colors">Top Rated TV Shows</h2>
-            </Link>
-            <Rail itemCount={Math.min(topRated.tv.results.length, 7)}>
-              {topRated.tv.results.slice(0, 7).map((m) => (
-                <div key={m.id} className="flex-shrink-0 w-[180px]">
-                  <MovieCard movie={{ ...m, media_type: "tv" }} showScore />
-                </div>
-              ))}
-            </Rail>
+            <SectionHeader title="Top Rated TV Shows" href="/browse/tv-top" />
+            {rail(topRated.tv.results, "tv", true)}
           </section>
         )}
       </div>

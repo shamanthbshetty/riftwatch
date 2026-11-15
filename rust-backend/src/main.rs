@@ -28,7 +28,8 @@ pub struct AppState {
     pub http_safe: reqwest::Client,
 }
 
-#[tokio::main]
+// Desktop app: a handful of worker threads is plenty and keeps idle CPU/memory low.
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     config::load_env();
     tracing_subscriber::registry()

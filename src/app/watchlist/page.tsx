@@ -14,6 +14,7 @@ import {
 import { useWatchlistItems, useMovieWatchlistItems } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 import { STATUS_ORDER, STATUS_LABELS, STATUS_BADGE_TEXT, STATUS_MENU_CLASS, StatusMenuList } from "@/components/WatchlistStatusButton";
+import EmptyState from "@/components/Skeleton";
 
 const FILTERS: ("all" | WatchStatus)[] = ["all", ...STATUS_ORDER];
 
@@ -128,7 +129,7 @@ function WatchlistContent() {
   const shownMovies = useMemo(() => filterByStatus(movieItems, statusFilter), [movieItems, statusFilter]);
 
   return (
-    <div className="max-w-7xl mx-auto pt-[84px] pb-6 space-y-6">
+    <div className="max-w-7xl mx-auto page-top pb-6 space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold">My Watchlist</h1>
         <span className="text-xs px-2 py-0.5 rounded bg-surface text-text-muted uppercase">{isMovies ? "Movies" : "Anime"}</span>
@@ -142,7 +143,7 @@ function WatchlistContent() {
               className={`text-xs px-3 py-1 rounded-full border transition-colors ${
                 statusFilter === s
                   ? "bg-accent text-white border-accent"
-                  : "bg-surface text-text-muted border-border hover:text-text"
+                  : "bg-surface text-text-muted border-border hover:text-foreground hover:border-border/80"
               }`}
             >
               {s === "all" ? "All" : STATUS_LABELS[s]} ({counts[s]})
@@ -151,20 +152,20 @@ function WatchlistContent() {
         </div>
       )}
       {items.length === 0 && (
-        <div className="text-center py-16 space-y-3">
-          <div className="mb-4">
-            <svg className="w-16 h-16 mx-auto text-text-secondary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <EmptyState
+          icon={
+            <svg className="h-16 w-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
             </svg>
-          </div>
-          <p className="text-text-muted font-medium">Your watchlist is empty</p>
-          <p className="text-text-secondary text-sm">
-            {isMovies ? "Search for movies to add them here." : "Search for anime to add them here."}
-          </p>
-        </div>
+          }
+          title="Your watchlist is empty"
+          description={
+            isMovies ? "Search for movies to add them here." : "Search for anime to add them here."
+          }
+        />
       )}
       {items.length > 0 && (isMovies ? shownMovies : shownAnime).length === 0 && (
-        <p className="text-center py-12 text-text-muted text-sm">Nothing with this status yet.</p>
+        <EmptyState title="Nothing with this status yet." description="Pick another status filter above." />
       )}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
         {isMovies

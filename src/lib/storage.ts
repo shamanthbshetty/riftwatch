@@ -152,6 +152,29 @@ export function setSkipPref(on: boolean) {
 
 export const getSkipSnapshot = (): boolean => cachedSnapshot("autoskip", getSkipPref);
 
+// Resume-where-you-left-off preference. Default ON — the saved position is
+// only ever applied when it is more than a few seconds in.
+const RESUME_PREF_KEY = "resume-playback";
+
+export function getResumePref(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(RESUME_PREF_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setResumePref(on: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(RESUME_PREF_KEY, on ? "1" : "0");
+  } catch { /* quota exceeded */ }
+  invalidate("resume-pref");
+}
+
+export const getResumePrefSnapshot = (): boolean => cachedSnapshot("resume-pref", getResumePref);
+
 /**
  * Raw JSON signature of every key refreshStore() re-reads. Cheap (no JSON.parse)
  * — lets the periodic poller skip notifying all subscribers when nothing changed.
@@ -289,6 +312,8 @@ export const getWatchedUpToSnapshot = (showId: string, mode: "sub" | "dub"): num
 interface ResumeEntry {
   t: number;
   at: number;
+  /** Media duration in seconds, when the player knew it. Enables a real progress bar. */
+  d?: number;
 }
 type ResumeMap = Record<string, ResumeEntry>;
 
@@ -305,10 +330,14 @@ export function getResumePos(key: string): number {
   return getResumeMap()[key]?.t ?? 0;
 }
 
-export function saveResumePos(key: string, time: number) {
+export function saveResumePos(key: string, time: number, duration?: number) {
   if (!Number.isFinite(time) || time < 5) return;
   const map = getResumeMap();
-  map[key] = { t: time, at: Date.now() };
+  map[key] = {
+    t: time,
+    at: Date.now(),
+    ...(Number.isFinite(duration) && (duration ?? 0) > 0 ? { d: duration } : {}),
+  };
   // Prune: drop stale entries, then cap the map so it can't grow unbounded.
   const now = Date.now();
   let entries = Object.entries(map).filter(([, e]) => now - e.at < RESUME_MAX_AGE);
@@ -336,6 +365,8 @@ export interface ShowResume {
   ep: number;
   mode: "sub" | "dub";
   t: number;
+  /** Duration of that episode in seconds, when known. */
+  d?: number;
 }
 
 export interface MovieResume {
@@ -343,6 +374,8 @@ export interface MovieResume {
   season?: number;
   episode?: number;
   t: number;
+  /** Duration in seconds, when known. */
+  d?: number;
 }
 
 /** Newest saved playback position across any episode of the show. */
@@ -358,7 +391,7 @@ export function getResumeForShow(showId: string): ShowResume | null {
     if ((mode !== "sub" && mode !== "dub") || !Number.isInteger(ep) || ep < 1) continue;
     if (e.at > bestAt) {
       bestAt = e.at;
-      best = { ep, mode, t: e.t };
+      best = { ep, mode, t: e.t, ...(e.d ? { d: e.d } : {}) };
     }
   }
   return best;
@@ -377,12 +410,12 @@ export function getResumeForMovie(id: string): MovieResume | null {
     const parts = k.split("|");
     let entry: MovieResume | null = null;
     if (parts[2] === "movie") {
-      entry = { type: "movie", t: e.t };
+      entry = { type: "movie", t: e.t, ...(e.d ? { d: e.d } : {}) };
     } else if (parts[2] === "tv") {
       const season = Number(parts[3]);
       const episode = Number(parts[4]);
       if (Number.isInteger(season) && Number.isInteger(episode)) {
-        entry = { type: "tv", season, episode, t: e.t };
+        entry = { type: "tv", season, episode, t: e.t, ...(e.d ? { d: e.d } : {}) };
       }
     }
     if (entry && e.at > bestAt) {

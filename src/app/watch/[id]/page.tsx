@@ -9,6 +9,7 @@ import SubDubToggle from "@/components/SubDubToggle";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
 
 import { addToHistory, getLastWatched, getWatchlist, addToWatchlist, removeFromWatchlist, setWatchlistStatus, setAutoplayPref, setSkipPref, type WatchStatus } from "@/lib/storage";
+import { sameShow } from "@/lib/show-id";
 import { useWatchlistItems, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 
@@ -25,6 +26,8 @@ interface Source {
 }
 
 interface ShowInfo {
+  /** Canonical id (/api/episodes _id) — used for watchlist identity. */
+  _id: string;
   name: string;
   englishName?: string;
   thumbnail: string;
@@ -81,8 +84,9 @@ function WatchContent() {
   const epPage = epPageState.page;
   const setEpPage = (p: number) => setEpPageState({ key: epPageKey, page: p });
   const [retryKey, setRetryKey] = useState(0);
+  const [epJump, setEpJump] = useState("");
+  const [epUnwatched, setEpUnwatched] = useState(false);
   const EP_PAGE_SIZE = 100;
-
   // Auto-resume: if no ep param, check history for last watched. The guard is a
   // ref because it's bookkeeping, not something we render.
   const resumedRef = useRef(false);
@@ -96,8 +100,6 @@ function WatchContent() {
   }, [id, epParam, router]);
 
   const watchlist = useWatchlistItems();
-  const inWatchlist = watchlist.some((i) => i.id === id);
-  const wlStatus = watchlist.find((i) => i.id === id)?.status ?? null;
   const { toast } = useToast();
 
   // Series metadata is keyed by show id.
@@ -111,6 +113,15 @@ function WatchContent() {
   const showInfo = meta?.showInfo ?? null;
   const epTitles = meta?.titles ?? EMPTY_TITLES;
   const epError = meta?.epError ?? "";
+
+  // Matched against every identity this page can prove — the entry may have
+  // been added from a different surface (detail page/spotlight/schedule) that
+  // used another id namespace for the same show.
+  const wlEntry = showInfo
+    ? watchlist.find((i) => sameShow(i, { id, canonicalId: showInfo._id || undefined, malId: showInfo.malId || undefined })) ?? null
+    : null;
+  const inWatchlist = wlEntry !== null;
+  const wlStatus = wlEntry?.status ?? null;
 
   // Stream state is keyed by the full request so switching episode/mode/series
   // can never render the previous request's sources. Deliberately NOT including
@@ -344,6 +355,7 @@ function WatchContent() {
                     const allSubEps = (d2.availableEpisodesDetail?.sub ?? []).map(Number).sort((a: number, b: number) => a - b);
                     const allDubEps = (d2.availableEpisodesDetail?.dub ?? []).map(Number).sort((a: number, b: number) => a - b);
                     const info: ShowInfo = {
+                      _id: d2._id ?? "",
                       name: d2.name,
                       englishName: d2.englishName,
                       thumbnail: d2.thumbnail,
@@ -390,6 +402,7 @@ function WatchContent() {
         const allSubEps = (d.availableEpisodesDetail?.sub ?? []).map(Number).sort((a: number, b: number) => a - b);
         const allDubEps = (d.availableEpisodesDetail?.dub ?? []).map(Number).sort((a: number, b: number) => a - b);
         const info: ShowInfo = {
+          _id: d._id ?? "",
           name: d.name,
           englishName: d.englishName,
           thumbnail: d.thumbnail,
@@ -402,7 +415,7 @@ function WatchContent() {
         setEpisodesState({ id, titles: {}, showInfo: info, epError: "" });
         try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* ignore */ }
         if (d.malId) {
-          fetch(`/api/titles?malId=${encodeURIComponent(d.malId)}`)
+          fetch(`/api/titles?malId=${encodeURIComponent(d.malId)}&title=${encodeURIComponent(d.englishName || d.name || "")}`)
             .then((r) => r.json())
             .then((t) => {
               if (cancelled) return;
@@ -453,12 +466,25 @@ function WatchContent() {
     writeHistory();
   }, [writeHistory]);
 
-  const watchedUpTo = useWatchedUpTo(id, mode);
+  const watchedUpTo = useWatchedUpTo(showInfo?._id || id, mode);
 
 
   const goTo = useCallback((newEp: number, newMode: "sub" | "dub") => {
+    // Mark every episode up to the one being opened as watched, so the grid
+    // reflects "done" immediately instead of waiting for playback to start.
+    if (showInfo) {
+      addToHistory({
+        id: showInfo._id || id,
+        title: showInfo.name,
+        englishName: showInfo.englishName,
+        thumbnail: showInfo.thumbnail,
+        malId: showInfo.malId ?? "",
+        ep: Number(newEp),
+        mode: newMode,
+      });
+    }
     router.push(`/watch/${id}?ep=${newEp}&mode=${newMode}${titleRef.current ? `&title=${encodeURIComponent(titleRef.current)}` : ""}`);
-  }, [id, router]);
+  }, [id, router, showInfo]);
 
   // Manual next (button/pill) works with Auto OFF — auto-advance is gated at
   // the call site via `onEnded={autoPlay ? goNext : undefined}` instead.
@@ -475,22 +501,43 @@ function WatchContent() {
       toast("Title details still loading");
       return;
     }
-    addToWatchlist({ id, title: showInfo.name, englishName: showInfo.englishName, thumbnail: showInfo.thumbnail, malId: showInfo.malId ?? "", lastEp: Number(ep), mode, status });
+    // Store under the canonical id (survives every route), replacing any
+    // legacy entry saved under another namespace — otherwise the same show
+    // ends up as two watchlist cards.
+    const canonicalId = showInfo._id || id;
+    if (wlEntry && wlEntry.id !== canonicalId) removeFromWatchlist(wlEntry.id);
+    addToWatchlist({ id: canonicalId, title: showInfo.name, englishName: showInfo.englishName, thumbnail: showInfo.thumbnail, malId: showInfo.malId ?? "", lastEp: Number(ep), mode, status });
     toast(`Added as ${STATUS_LABELS[status]}`, "success");
   }
 
   function changeStatus(status: WatchStatus) {
-    setWatchlistStatus(id, status);
+    if (!wlEntry) return;
+    setWatchlistStatus(wlEntry.id, status);
     toast(`Marked as ${STATUS_LABELS[status]}`);
   }
 
   function removeFromList() {
-    removeFromWatchlist(id);
+    if (!wlEntry) return;
+    removeFromWatchlist(wlEntry.id);
     toast("Removed from watchlist");
   }
 
   const epTitle = epTitles[ep];
   const currentEp = Number(ep);
+
+  // Auto-snap the episode tab to the one containing the currently playing
+  // episode, so watching ep 350 shows the 300-400 tab instead of 1-100.
+  useEffect(() => {
+    if (!currentEp || !showInfo) return;
+    const primary = mode === "sub" ? showInfo.allSubEps : showInfo.allDubEps;
+    const fallback = mode === "sub" ? showInfo.allDubEps : showInfo.allSubEps;
+    const all = primary.length > 0 ? primary : fallback;
+    const idx = all.indexOf(currentEp);
+    if (idx < 0) return;
+    const p = Math.floor(idx / 100);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEpPageState((prev) => (prev.key === epPageKey && prev.page !== p ? { key: epPageKey, page: p } : prev));
+  }, [currentEp, mode, showInfo, epPageKey]);
   // Last available episode for this mode (unknown → assume a next exists).
   // Prefer the current mode's episode list; fall back to the other mode's list
   // so episodes always render even when the backend only knows sub counts.
@@ -506,7 +553,7 @@ function WatchContent() {
   const nextEpLabel = `EP ${currentEp + 1}`;
 
   return (
-    <div className="max-w-7xl mx-auto pt-10 pb-4 space-y-4">
+    <div className="max-w-7xl mx-auto page-top pb-4 space-y-4">
       {/* Back button */}
       <button onClick={() => router.push("/")} className="text-text-muted hover:text-foreground transition-colors">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
@@ -567,9 +614,12 @@ function WatchContent() {
                 type={sources[selectedSource]?.type}
                 subtitles={sources[selectedSource]?.subtitles ?? EMPTY_SUBTITLES}
                 onEnded={autoPlay && hasNextEp ? goNext : undefined}
+                onNext={hasNextEp ? goNext : undefined}
+                autoAdvance={autoPlay}
+                nextTitle={epTitles[String(currentEp + 1)] ? `EP ${currentEp + 1} — ${epTitles[String(currentEp + 1)]}` : undefined}
                 onError={handleSourceError}
                 onFirstPlay={markPlayed}
-                storageKey={`anime|${id}|${mode}|${ep}`}
+                storageKey={`anime|${showInfo?._id || id}|${mode}|${ep}`}
                 nextLabel={hasNextEp ? nextEpLabel : undefined}
                 skipIntro={sources[selectedSource]?.intro ?? skip?.intro ?? null}
                 skipOutro={sources[selectedSource]?.outro ?? skip?.outro ?? null}
@@ -666,27 +716,90 @@ function WatchContent() {
         const fallbackEps = mode === "sub" ? showInfo.allDubEps : showInfo.allSubEps;
         const allEps = primaryEps.length > 0 ? primaryEps : fallbackEps;
         if (allEps.length === 0) return null;
-        const totalPages = Math.ceil(allEps.length / EP_PAGE_SIZE);
+        // Filter first — paging, the jump box and the count all follow the
+        // filtered list so the toolbar can't point at a hidden episode.
+        const eps = epUnwatched && watchedUpTo > 0
+          ? allEps.filter((n) => n > watchedUpTo || n === currentEp)
+          : allEps;
+        const totalPages = Math.ceil(eps.length / EP_PAGE_SIZE);
         // Clamp: the dub list can be shorter than the sub list, so a page index
         // that was valid a render ago may now be out of range.
         const page = Math.min(epPage, Math.max(0, totalPages - 1));
         const start = page * EP_PAGE_SIZE;
-        const visible = allEps.slice(start, start + EP_PAGE_SIZE);
+        const visible = eps.slice(start, start + EP_PAGE_SIZE);
         const currentOnDifferentPage = !visible.includes(currentEp) && totalPages > 1;
+        const hasUnwatched = watchedUpTo > 0 && allEps.some((n) => n > watchedUpTo);
+
+        function submitJump(e: React.FormEvent) {
+          e.preventDefault();
+          const n = Number.parseInt(epJump, 10);
+          if (!Number.isFinite(n) || !allEps.includes(n)) return;
+          if (!eps.includes(n)) setEpUnwatched(false);
+          setEpPage(Math.floor(allEps.indexOf(n) / EP_PAGE_SIZE));
+          setEpJump("");
+          goTo(n, mode); // eslint-disable-line react-hooks/refs
+        }
+
         return (
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wide">Episodes</h2>
+          <section className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wide">Episodes</h2>
+              <span className="text-xs text-text-muted tabular-nums">
+                {eps.length === allEps.length ? `${allEps.length} eps` : `${eps.length} of ${allEps.length} eps`}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <form onSubmit={submitJump} className="flex items-center gap-1.5">
+                <label htmlFor="ep-jump" className="text-2xs font-medium uppercase tracking-wide text-text-secondary">
+                  Jump to ep
+                </label>
+                <input
+                  id="ep-jump"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={epJump}
+                  onChange={(e) => setEpJump(e.target.value)}
+                  placeholder={String(allEps[allEps.length - 1])}
+                  className="w-16 rounded-control border border-border bg-surface px-2 py-1.5 text-xs tabular-nums text-foreground placeholder:text-text-secondary focus:border-accent/50 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!epJump}
+                  className="rounded-control border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-40"
+                >
+                  Go
+                </button>
+              </form>
+              {hasUnwatched && (
+                <button
+                  type="button"
+                  aria-pressed={epUnwatched}
+                  onClick={() => setEpUnwatched((v) => !v)}
+                  className={`rounded-chip border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    epUnwatched
+                      ? "border-accent bg-accent/15 text-accent"
+                      : "border-border bg-surface text-text-muted hover:text-foreground"
+                  }`}
+                >
+                  Unwatched only
+                </button>
+              )}
+            </div>
             {totalPages > 1 && (
               <div className="flex items-center gap-2 flex-wrap">
                 {Array.from({ length: totalPages }, (_, i) => {
                   const lo = i * EP_PAGE_SIZE + 1;
-                  const hi = Math.min((i + 1) * EP_PAGE_SIZE, allEps.length);
+                  const hi = Math.min((i + 1) * EP_PAGE_SIZE, eps.length);
                   return (
                     <button
                       key={i}
                       onClick={() => setEpPage(i)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                        i === page ? "bg-accent text-white" : "bg-surface text-text-muted hover:bg-surface-hover hover:text-foreground"
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 border ${
+                        i === page
+                          ? "bg-accent text-white border-accent shadow-md shadow-accent/20"
+                          : "bg-surface text-text-muted border-border hover:border-accent/40 hover:text-foreground"
                       }`}
                     >
                       {lo}–{hi}
@@ -696,14 +809,19 @@ function WatchContent() {
                 {currentOnDifferentPage && (
                   <button
                     onClick={() => setEpPage(Math.floor(allEps.indexOf(currentEp) / EP_PAGE_SIZE))}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent/20 text-accent hover:bg-accent/30 transition-colors"
+                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors"
                   >
                     Jump to Ep {currentEp}
                   </button>
                 )}
               </div>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
+            {eps.length === 0 && (
+              <p className="rounded-control border border-border bg-surface px-3 py-4 text-center text-xs text-text-secondary">
+                You&apos;ve watched every available episode.
+              </p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
               {visible.map((epNum) => {
                 const isActive = epNum === currentEp;
                 const isWatched = watchedUpTo > 0 && epNum <= watchedUpTo && !isActive;
@@ -711,21 +829,39 @@ function WatchContent() {
                 return (
                   <button
                     key={epNum}
-                    onClick={() => goTo(epNum, mode)} // eslint-disable-line react-hooks/refs
-                    className={`text-left px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                    onClick={() => goTo(epNum, mode)}
+                    className={`group relative flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
                       isActive
-                        ? "bg-accent text-white font-bold shadow-md shadow-accent/20"
+                        ? "bg-accent/15 border-accent shadow-lg shadow-accent/10"
                         : isWatched
-                          ? "bg-red-600/20 text-red-600 border border-red-600/30"
-                          : "bg-surface hover:bg-surface-hover text-text-muted hover:text-foreground"
+                          ? "bg-surface/50 border-border/40 opacity-75 hover:opacity-100"
+                          : "bg-surface border-border hover:border-accent/40 hover:bg-surface-hover"
                     }`}
                   >
-                    <span className="font-semibold">EP {epNum}</span>
-                    {title && (
-                      <>
-                        <span className="mx-1.5 text-text-secondary">—</span>
-                        <span className="truncate">{title}</span>
-                      </>
+                    <span className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold tabular-nums ${
+                      isActive ? "bg-accent text-white" : isWatched ? "bg-emerald-500/15 text-emerald-500" : "bg-surface-hover text-foreground/80"
+                    }`}>
+                      {epNum}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[11px] font-semibold uppercase tracking-wider ${isActive ? "text-accent" : "text-text-muted"}`}>
+                          Episode {epNum}
+                        </span>
+                        {isWatched && (
+                          <svg className="w-3 h-3 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      {title && (
+                        <p className={`text-xs leading-snug line-clamp-1 mt-0.5 ${isActive ? "text-accent/80" : "text-text-muted"}`}>
+                          {title}
+                        </p>
+                      )}
+                    </div>
+                    {isActive && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-accent flex-shrink-0">Now</span>
                     )}
                   </button>
                 );
@@ -742,7 +878,7 @@ export default function WatchPage() {
   return (
     <Suspense
       fallback={
-        <div className="max-w-7xl mx-auto pt-10 pb-4">
+        <div className="max-w-7xl mx-auto page-top pb-4">
           <div className="player-wrap w-full bg-black rounded-lg" style={{ aspectRatio: "16/9" }}>
             <div className="flex items-center justify-center h-full">
               <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin" />

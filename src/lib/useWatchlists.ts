@@ -19,6 +19,7 @@ import {
   getMovieWatchedUpToSnapshot,
   getAutoplaySnapshot,
   getSkipSnapshot,
+  getResumePrefSnapshot,
   setTheme as persistTheme,
   type WatchlistItem,
   type MovieWatchlistItem,
@@ -150,6 +151,12 @@ export function useAutoplayPref(): boolean {
 export function useSkipPref(): boolean {
   useCrossTabSync();
   return useSyncExternalStore(subscribeStore, getSkipSnapshot, () => true);
+}
+
+/** Persisted "resume where I left off" preference (server snapshot: ON). */
+export function useResumePref(): boolean {
+  useCrossTabSync();
+  return useSyncExternalStore(subscribeStore, getResumePrefSnapshot, () => true);
 }
 
 const EMPTY_NOTIFICATIONS: AppNotification[] = [];

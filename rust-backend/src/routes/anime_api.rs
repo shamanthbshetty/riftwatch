@@ -224,18 +224,24 @@ pub async fn relations(State(state): State<AppState>, Query(q): Query<RelQ>) -> 
 
 // ── /api/titles ──
 
-pub async fn titles(State(state): State<AppState>, Query(q): Query<MalQ>) -> impl IntoResponse {
-    let mal_id = match q.mal_id {
-        Some(v) if !v.is_empty() => v,
-        _ => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "malId required" })),
-            )
-                .into_response()
-        }
-    };
-    match anilist::get_episode_titles(&state.http, &mal_id).await {
+#[derive(Deserialize)]
+pub struct TitlesQ {
+    #[serde(rename = "malId")]
+    pub mal_id: Option<String>,
+    pub title: Option<String>,
+}
+
+pub async fn titles(State(state): State<AppState>, Query(q): Query<TitlesQ>) -> impl IntoResponse {
+    let mal_id = q.mal_id.as_deref().filter(|v| !v.is_empty());
+    let title = q.title.as_deref().filter(|v| !v.is_empty());
+    if mal_id.is_none() && title.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "malId or title required" })),
+        )
+            .into_response();
+    }
+    match anilist::get_episode_titles(&state.http, mal_id.unwrap_or(""), title).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err_502(&e),
     }

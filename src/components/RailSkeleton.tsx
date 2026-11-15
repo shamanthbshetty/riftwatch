@@ -1,3 +1,5 @@
+import { Skeleton } from "./Skeleton";
+
 /**
  * Shimmer placeholder for a horizontally scrolling rail — mirrors the real
  * rail's layout (heading + card row) so the page doesn't pop when data lands.
@@ -5,12 +7,12 @@
 export default function RailSkeleton() {
   return (
     <section aria-hidden>
-      <div className="mb-4 pl-10 pr-4 md:pl-10 md:pr-8">
-        <div className="skeleton h-6 w-44 rounded" />
+      <div className="mb-2">
+        <Skeleton className="h-5 w-40" />
       </div>
       <div className="carousel-scroll">
         {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="flex-shrink-0 w-[180px] aspect-[3/4] rounded-md skeleton" />
+          <Skeleton key={i} className="aspect-[3/4] w-[168px] flex-shrink-0" />
         ))}
       </div>
     </section>

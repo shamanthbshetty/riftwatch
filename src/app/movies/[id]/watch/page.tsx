@@ -274,7 +274,7 @@ export default function MovieWatchPage() {
   }, [sources, selectedSource, streamKey]);
 
   return (
-    <div className="max-w-7xl mx-auto pt-10 pb-4 space-y-4">
+    <div className="max-w-7xl mx-auto page-top pb-4 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <button onClick={() => router.push(`/movies/${id}`)} className="text-text-muted hover:text-foreground transition-colors" title="Back to details">

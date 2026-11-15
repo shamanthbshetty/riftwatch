@@ -91,7 +91,7 @@ export default function MovieDetailPage() {
 
   if (loading) {
     return (
-      <div className="pt-[80px]">
+      <div className="page-top">
         {/* Mirrors the loaded layout (back row + full-bleed backdrop) so the
             offset doesn't jump when detail lands. */}
         <div className="max-w-7xl mx-auto pt-4">
@@ -104,7 +104,7 @@ export default function MovieDetailPage() {
 
   if (!detail) {
     return (
-      <div className="max-w-7xl mx-auto pt-[80px] pb-16 text-center text-text-muted">
+      <div className="max-w-7xl mx-auto page-top pb-16 text-center text-text-muted">
         <p>Movie not found.</p>
         <Link href="/?tab=movies" className="text-accent hover:underline mt-2 inline-block">Back to Movies</Link>
       </div>
@@ -133,7 +133,7 @@ export default function MovieDetailPage() {
   }
 
   return (
-    <div className="min-h-screen pt-[80px]">
+    <div className="min-h-screen page-top">
       {/* Back button */}
       <div className="max-w-7xl mx-auto pt-4">
         <Link href="/?tab=movies" className="text-text-muted hover:text-foreground transition-colors">
