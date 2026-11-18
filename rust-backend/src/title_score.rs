@@ -66,12 +66,49 @@ fn season_of(normalized: &str) -> Option<u32> {
     re.captures(normalized).and_then(|c| c[1].parse().ok())
 }
 
+// Format words identify WHICH work of a franchise a title is. They carry no
+// identity for coverage (any title can carry them, so they stay generic there),
+// but they decide agreement: without this the query "… Quintuplets Movie" rated
+// the TV series ABOVE the movie page ("movie" didn't count as identity, so the
+// shorter series candidate just lost fewer extra-word points) and the movie
+// played TV episode 1.
+const FORMAT: &[&str] = &[
+    "movie", "movies", "ova", "ovas", "ona", "onas", "special", "specials",
+];
+// Both sides agree on the work's format → boost; the query names a format the
+// candidate lacks (or a different one) → push below MIN_SCORE so a franchise's
+// TV entry can never stand in for its movie. A candidate that merely ADDS a
+// format word the query didn't say ("Mugen Train" → "Mugen Train the Movie")
+// only gets a nudge — that's ordinary provider naming, not a different work.
+const FORMAT_BONUS: i32 = 250;
+const FORMAT_PENALTY: i32 = 500;
+const EXTRA_FORMAT_PENALTY: i32 = 200;
+
+fn format_token(normalized: &str) -> Option<&'static str> {
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    FORMAT.iter().copied().find(|f| words.contains(f))
+}
+
 pub fn score_title(query: &str, candidate: &str) -> i32 {
     let q = normalize(query);
     let c = normalize(candidate);
     if q.is_empty() || c.is_empty() {
         return 0;
     }
+    let base = base_score(&q, &c);
+    let (q_fmt, c_fmt) = (format_token(&q), format_token(&c));
+    match (q_fmt, c_fmt) {
+        // Same format named on both sides ("… Movie" vs "…: The Movie").
+        (Some(a), Some(b)) if a == b => base + FORMAT_BONUS,
+        // Query wants a specific format this candidate is not.
+        (Some(_), _) => base - FORMAT_PENALTY,
+        // Candidate names a format the query didn't ask about.
+        (None, Some(_)) => base - EXTRA_FORMAT_PENALTY,
+        (None, None) => base,
+    }
+}
+
+fn base_score(q: &str, c: &str) -> i32 {
     if c == q {
         return 1000;
     }

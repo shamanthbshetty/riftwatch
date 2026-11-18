@@ -63,13 +63,12 @@ export default function Rail({ children, itemCount = 0 }: { children: ReactNode;
       lastX = e.clientX;
       lastTime = performance.now();
       velocity = 0;
-      el.setPointerCapture(e.pointerId);
       el.style.userSelect = "none";
     };
     const onMove = (e: PointerEvent) => {
       if (!isDown) return;
       const dx = e.clientX - startX;
-      if (Math.abs(dx) > 3) moved = true;
+      if (Math.abs(dx) > 10) moved = true;
       el.scrollLeft = scrollStart - dx;
       const now = performance.now();
       const dt = now - lastTime;
@@ -84,6 +83,9 @@ export default function Rail({ children, itemCount = 0 }: { children: ReactNode;
       isDown = false;
       try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
       el.style.userSelect = "";
+
+      // Reset moved flag after a short delay to allow click event to fire
+      setTimeout(() => { moved = false; }, 50);
 
       let v = velocity * 16;
       const decay = 0.92;
@@ -103,6 +105,9 @@ export default function Rail({ children, itemCount = 0 }: { children: ReactNode;
       isDown = false;
       try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
       el.style.userSelect = "";
+
+      // Reset moved flag after a short delay to allow click event to fire
+      setTimeout(() => { moved = false; }, 50);
       velocity = 0;
     };
     // Prevent click-through on cards after a drag.
