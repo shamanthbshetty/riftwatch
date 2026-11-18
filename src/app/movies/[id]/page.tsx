@@ -309,7 +309,7 @@ export default function MovieDetailPage() {
       )}
 
       {/* Trailer modal */}
-      {trailerOpen && trailerKey && (
+      {trailerOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setTrailerOpen(false)}
@@ -324,7 +324,11 @@ export default function MovieDetailPage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             <iframe
-              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+              src={
+                trailerKey
+                  ? `https://www.youtube.com/embed/${trailerKey}?autoplay=1`
+                  : `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(title + " trailer")}`
+              }
               title="Trailer"
               className="w-full h-full rounded-lg"
               allow="autoplay; encrypted-media; picture-in-picture"
