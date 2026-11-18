@@ -323,17 +323,28 @@ export default function MovieDetailPage() {
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
-            <iframe
-              src={
-                trailerKey
-                  ? `https://www.youtube.com/embed/${trailerKey}?autoplay=1`
-                  : `https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(title + " trailer")}`
-              }
-              title="Trailer"
-              className="w-full h-full rounded-lg"
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-            />
+            {trailerKey ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+                title="Trailer"
+                className="w-full h-full rounded-lg"
+                allow="autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-white/80 p-6 text-center">
+                <p className="text-sm">No official trailer on TMDB.</p>
+                <a
+                  href={`https://www.youtube.com/results?search_query=${encodeURIComponent(title + " trailer")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-border"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  Search YouTube
+                </a>
+              </div>
+            )}
           </div>
         </div>
       )}
