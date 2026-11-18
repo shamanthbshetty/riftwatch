@@ -174,13 +174,10 @@ export default function EpisodeList({ episodes, mode, titles, currentEp, watched
                   <span className="text-[9px] font-bold uppercase tracking-wider text-accent">Now</span>
                 )}
               </div>
-              {showInline && title && (
-                <span className={`mt-1.5 text-[11px] leading-snug line-clamp-2 ${isActive ? "text-accent/80" : "text-text-muted"}`}>
-                  {title}
-                </span>
-              )}
-              {!showInline && title && (
-                <span className="absolute inset-x-0 -bottom-1 translate-y-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 text-[10px] text-foreground bg-surface/95 backdrop-blur border border-border rounded-md px-2 py-1 shadow-lg whitespace-normal max-w-[240px]">
+              {title && (
+                <span
+                  className={`mt-1.5 min-w-0 leading-snug break-words ${showInline ? "text-[11px] line-clamp-2" : "text-[10px] line-clamp-1"} ${isActive ? "text-accent/80" : "text-text-muted"}`}
+                >
                   {title}
                 </span>
               )}

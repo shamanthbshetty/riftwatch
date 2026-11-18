@@ -41,6 +41,11 @@ interface ShowInfo {
 const EMPTY_SOURCES: Source[] = [];
 const EMPTY_SUBTITLES: NonNullable<Source["subtitles"]> = [];
 const EMPTY_TITLES: Record<string, string> = {};
+// Only used when the backend proves the id doesn't exist (404). A failed
+// upstream lookup must not render this.
+const EP_NOT_FOUND = "This anime could not be found. The link may be outdated.";
+const EP_UPSTREAM_DOWN =
+  "Couldn't load this anime right now — the lookup service didn't respond. Try again.";
 
 interface SkipInterval {
   start: number;
@@ -84,6 +89,7 @@ function WatchContent() {
   const epPage = epPageState.page;
   const setEpPage = (p: number) => setEpPageState({ key: epPageKey, page: p });
   const [retryKey, setRetryKey] = useState(0);
+  const [epLoadKey, setEpLoadKey] = useState(0);
   const [epJump, setEpJump] = useState("");
   const [epUnwatched, setEpUnwatched] = useState(false);
   const EP_PAGE_SIZE = 100;
@@ -320,7 +326,6 @@ function WatchContent() {
 
   useEffect(() => {
     let cancelled = false;
-    const NOT_FOUND = "This anime could not be found. The link may be outdated.";
     async function loadEpisodes(attempt = 0) {
       const tp = titleRef.current
         ? `&title=${encodeURIComponent(titleRef.current)}`
@@ -328,6 +333,7 @@ function WatchContent() {
       try {
         const r = await fetch(`/api/episodes?id=${encodeURIComponent(id)}${tp}`);
         if (!r.ok) {
+          const status = r.status;
           if (attempt < 2) { setTimeout(() => loadEpisodes(attempt + 1), 800); return; }
           // Try to recover a title from watchlist/history and retry once.
           if (attempt === 2) {
@@ -380,7 +386,7 @@ function WatchContent() {
             setEpisodesState({ id, titles: {}, showInfo: cached, epError: "" });
             return;
           }
-          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: NOT_FOUND });
+          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: status === 404 ? EP_NOT_FOUND : EP_UPSTREAM_DOWN });
           return;
         }
         const d = await r.json();
@@ -393,7 +399,7 @@ function WatchContent() {
             setEpisodesState({ id, titles: {}, showInfo: cached, epError: "" });
             return;
           }
-          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: d.error || NOT_FOUND });
+          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: EP_UPSTREAM_DOWN });
           return;
         }
         const allSubEps = (d.availableEpisodesDetail?.sub ?? []).map(Number).sort((a: number, b: number) => a - b);
@@ -432,7 +438,7 @@ function WatchContent() {
     }
     loadEpisodes();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, epLoadKey]);
 
   // History is written when playback ACTUALLY starts, not when metadata
   // lands: merely opening (or failing to load) an episode must not mark it
@@ -564,11 +570,19 @@ function WatchContent() {
               <svg className="w-12 h-12 text-text-secondary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="font-medium">Anime not found</span>
+              <span className="font-medium">{epError === EP_NOT_FOUND ? "Anime not found" : "Couldn't load anime info"}</span>
               <span className="text-xs text-text-secondary max-w-xs">{epError}</span>
-              <Link href="/" className="px-4 py-2 rounded-lg text-sm font-medium bg-accent hover:bg-accent-hover text-white transition-colors mt-2">
-                Browse Anime
-              </Link>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  onClick={() => { setEpisodesState(null); setEpLoadKey((k) => k + 1); }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-accent hover:bg-accent-hover text-white transition-colors"
+                >
+                  Retry
+                </button>
+                <Link href="/" className="px-4 py-2 rounded-lg text-sm font-medium bg-surface hover:bg-surface-hover text-text-muted border border-border transition-colors">
+                  Browse Anime
+                </Link>
+              </div>
             </div>
           </div>
         ) : loading ? (

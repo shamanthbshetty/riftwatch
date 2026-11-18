@@ -98,10 +98,24 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     let cancelled = false;
     const empty: Record<string, string> = {};
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
-    fetch(`/api/episodes?id=${encodeURIComponent(id)}`)
-      .then((r) => r.json())
-      .then((data: ShowDetail & { error?: string }) => {
+    // Upstream lookups (AllAnime/AniList) are occasionally rate-limited. A
+    // single 502 used to render "Anime not found" for a show that exists, so
+    // retry twice before declaring the page unavailable.
+    async function loadShow(attempt = 0) {
+      try {
+        const r = await fetch(`/api/episodes?id=${encodeURIComponent(id)}`);
+        if (cancelled) return;
+        if (!r.ok) {
+          if (attempt < 2) {
+            timers.push(setTimeout(() => loadShow(attempt + 1), 800));
+            return;
+          }
+          setLoaded({ key, show: null, titles: empty, schedule: null, relations: [] });
+          return;
+        }
+        const data: ShowDetail & { error?: string } = await r.json();
         if (cancelled) return;
         if (!data.error && data._id) {
           if ((data.availableEpisodesDetail?.dub ?? []).length === 0) setMode("sub");
@@ -142,12 +156,20 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
           return;
         }
         setLoaded({ key, show: null, titles: empty, schedule: null, relations: [] });
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded({ key, show: null, titles: empty, schedule: null, relations: [] });
-      });
+      } catch {
+        if (cancelled) return;
+        if (attempt < 2) {
+          timers.push(setTimeout(() => loadShow(attempt + 1), 800));
+          return;
+        }
+        setLoaded({ key, show: null, titles: empty, schedule: null, relations: [] });
+      }
+    }
+
+    loadShow();
     return () => {
       cancelled = true;
+      timers.forEach(clearTimeout);
     };
   }, [id, key]);
 
@@ -246,8 +268,8 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         }
-        title="Anime not found"
-        description="This show might be unavailable or the ID is invalid."
+        title="Couldn't load this anime"
+        description="This show may be unavailable right now, or the ID is invalid."
         action={
           <button
             onClick={() => setRetryKey((k) => k + 1)}

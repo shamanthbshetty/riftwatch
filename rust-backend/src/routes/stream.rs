@@ -18,6 +18,7 @@ use crate::scrapers::aniwatch::get_aniwatch_embed;
 use crate::scrapers::kenjitsu::get_kenjitsu_stream;
 use crate::title_score::search_ready;
 use crate::AppState;
+use crate::anilist::anilist_post;
 
 #[derive(Deserialize)]
 pub struct Q {
@@ -96,7 +97,9 @@ async fn resolve_show_name(
     client: &reqwest::Client,
     id: &str,
     fallback_title: Option<&str>,
-) -> Option<Resolved> {
+) -> Result<Resolved, ResolveErr> {
+    let mut upstream_err: Option<String> = None;
+
     if let Some(kitsu_id) = id.strip_prefix("kitsu-") {
         let kitsu = async {
             let res = client
@@ -140,76 +143,92 @@ async fn resolve_show_name(
             })
         }
         .await;
-        if kitsu.is_some() {
-            return kitsu;
-        }
-        return fallback_title.map(|f| Resolved {
-            name: search_ready(f),
-            english_name: None,
-        });
+        return kitsu
+            .or_else(|| {
+                fallback_title.map(|f| Resolved {
+                    name: search_ready(f),
+                    english_name: None,
+                })
+            })
+            .ok_or_else(|| ResolveErr::Upstream("Kitsu lookup failed".into()));
     }
 
-    // AllAnime API may be down — treat a failed lookup as "no show".
-    if let Ok(show) = get_show(id).await {
-        return Some(Resolved {
-            name: search_ready(&show.name),
-            english_name: show.english_name,
-        });
-    }
+    // AllAnime API may be down — remember that so a failed lookup is not
+    // mistaken for a non-existent show.
+    match get_show(id).await {
+        Ok(show) => {
+            return Ok(Resolved {
+                name: search_ready(&show.name),
+                english_name: show.english_name,
+            })
+        }
+        // Keep the first failure — it names the service that actually broke.
+        Err(e) => upstream_err.get_or_insert(e),
+    };
 
     // The id may be a MAL id (e.g. from the airing schedule) or an AniList id
     // rather than an AllAnime hash. Try AniList before giving up so a dead
     // AllAnime mirror doesn't 404 the whole request.
     if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) {
-        let anilist = async {
-            for field in ["id", "idMal"] {
-                let query = format!(
-                    "query($id: Int!) {{ Media({}: $id, type: ANIME) {{ title {{ english romaji }} }} }}",
-                    field
-                );
-                let body = json!({ "query": query, "variables": { "id": id.parse::<i64>().unwrap_or(0) } });
-                let res = client
-                    .post("https://graphql.anilist.co")
-                    .json(&body)
-                    .timeout(Duration::from_secs(8))
-                    .send()
-                    .await
-                    .ok()?;
-                if !res.status().is_success() {
+        let mut definitive_miss = false;
+        for field in ["id", "idMal"] {
+            let query = format!(
+                "query($id: Int!) {{ Media({}: $id, type: ANIME) {{ title {{ english romaji }} }} }}",
+                field
+            );
+            let j = match anilist_post(
+                client,
+                &query,
+                &json!({ "id": id.parse::<i64>().unwrap_or(0) }),
+                Duration::from_secs(8),
+            )
+            .await
+            {
+                Ok(j) => j,
+                Err(e) => {
+                    upstream_err.get_or_insert(e);
                     continue;
                 }
-                let j = res.json::<Value>().await.ok()?;
-                let title = &j["data"]["Media"]["title"];
-                let name = title["english"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| title["romaji"].as_str().filter(|s| !s.is_empty()));
-                if let Some(name) = name {
-                    return Some(Resolved {
-                        name: search_ready(name),
-                        english_name: title["english"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .map(String::from),
-                    });
-                }
+            };
+            let title = &j["data"]["Media"]["title"];
+            let name = title["english"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .or_else(|| title["romaji"].as_str().filter(|s| !s.is_empty()));
+            if let Some(name) = name {
+                return Ok(Resolved {
+                    name: search_ready(name),
+                    english_name: title["english"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(String::from),
+                });
             }
-            None
+            definitive_miss = true;
         }
-        .await;
-        if anilist.is_some() {
-            return anilist;
+        if definitive_miss {
+            return Err(ResolveErr::NotFound);
         }
     }
 
-    fallback_title.map(|f| Resolved {
-        name: search_ready(f),
-        english_name: None,
-    })
+    if let Some(f) = fallback_title {
+        return Ok(Resolved {
+            name: search_ready(f),
+            english_name: None,
+        });
+    }
+
+    match upstream_err {
+        Some(e) => Err(ResolveErr::Upstream(e)),
+        None => Err(ResolveErr::NotFound),
+    }
 }
 
 enum ResolveErr {
     NotFound,
+    // An upstream lookup (AllAnime/AniList/Kitsu) failed — retryable, and must
+    // not be reported to the user as "anime not found".
+    Upstream(String),
     // Sources came back empty — message already carries the sub/dub wording.
     NoSources(String),
 }
@@ -261,10 +280,7 @@ async fn resolve_sources(
     mode: &str,
     fallback_title: Option<&str>,
 ) -> Result<Vec<Value>, ResolveErr> {
-    let resolved =
-        resolve_show_name(&state.http, id, fallback_title)
-            .await
-            .ok_or(ResolveErr::NotFound)?;
+    let resolved = resolve_show_name(&state.http, id, fallback_title).await?;
     // Upstream sites (aniwatch/anikoto) index by English titles, so prefer the
     // English name for searching; fall back to the romaji name when missing.
     let show_name = resolved
@@ -380,6 +396,11 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> Respo
         Err(ResolveErr::NotFound) => {
             (StatusCode::NOT_FOUND, Json(json!({"error": "Anime not found"}))).into_response()
         }
+        Err(ResolveErr::Upstream(e)) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": format!("Anime lookup temporarily unavailable ({e})") })),
+        )
+            .into_response(),
         Err(ResolveErr::NoSources(msg)) => {
             note_failure(&fail_key);
             (StatusCode::BAD_GATEWAY, Json(json!({ "error": msg }))).into_response()

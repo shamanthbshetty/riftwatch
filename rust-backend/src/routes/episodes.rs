@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 use crate::AppState;
+use crate::anilist::anilist_post;
 
 #[derive(Deserialize)]
 pub struct Q { pub id: Option<String>, pub title: Option<String> }
@@ -215,95 +216,116 @@ async fn avail_by_allanime_name(client: &reqwest::Client, name: &str) -> Option<
     Some(AllanimeMatch { id: gid.clone(), detail: avail_by_allanime_id(client, &gid).await? })
 }
 
-async fn resolve_anilist_by_id(client: &reqwest::Client, anilist_id: &str) -> Option<ShowDetail> {
+// Ok(Some) = resolved · Ok(None) = AniList definitively doesn't know the id ·
+// Err = AniList could not be reached / rate-limited us, so the caller must not
+// report "not found".
+async fn resolve_anilist_by_id(
+    client: &reqwest::Client,
+    anilist_id: &str,
+) -> Result<Option<ShowDetail>, String> {
+    let id_num = match anilist_id.parse::<i64>() {
+        Ok(n) => n,
+        Err(_) => return Ok(None),
+    };
+    let mut upstream_err: Option<String> = None;
     for field in ["id", "idMal"] {
         let query = format!(r#"query($id: Int!) {{ Media({}: $id, type: ANIME) {{ title {{ english romaji }} idMal description coverImage {{ large }} status genres episodes }} }}"#, field);
-        let body = json!({ "query": query, "variables": { "id": anilist_id.parse::<i64>().ok()? } });
-        if let Ok(res) = client.post("https://graphql.anilist.co").json(&body).timeout(Duration::from_secs(8)).send().await {
-            if res.status().is_success() {
-                if let Ok(j) = res.json::<Value>().await {
-                    let media = &j["data"]["Media"];
-                if !media.is_null() {
-                    let title = &media["title"];
-                    let name = title["english"].as_str().or_else(|| title["romaji"].as_str()).unwrap_or("").to_string();
-                    if !name.is_empty() {
-                        let mal_id = media["idMal"].as_i64().map(|x| x.to_string()).unwrap_or_default();
-                        let genres: Vec<String> = media["genres"].as_array().map(|a| a.iter().filter_map(|g| g.as_str().map(String::from)).collect()).unwrap_or_default();
-                        // Real ids from AllAnime when it has the show; AniList's
-                        // episode count (null on airing titles) only as a fallback.
-                        let ep_count = media["episodes"].as_i64().unwrap_or(0);
-                        let mut detail = AvailDetail {
-                            sub: (1..=ep_count).map(|i| i.to_string()).collect(),
-                            dub: (1..=ep_count).map(|i| i.to_string()).collect(),
-                        };
-                        // Canonical (AllAnime) id, so a watchlist entry written
-                        // from any id namespace resolves on every route.
-                        let mut show_id = anilist_id.to_string();
-                        if let Some(aa) = avail_by_allanime_name(client, &name).await {
-                            show_id = aa.id;
-                            detail = aa.detail;
-                        }
-                        return Some(ShowDetail {
-                            id: show_id,
-                            name,
-                            english_name: title["english"].as_str().map(String::from),
-                            thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
-                            description: strip_html(media["description"].as_str().unwrap_or("")),
-                            status: media["status"].as_str().unwrap_or("").to_string(),
-                            score: 0.0,
-                            mal_id: mal_id,
-                            genres,
-                            tags: vec![],
-                            available_episodes: Avail { sub: detail.sub.len() as i64, dub: detail.dub.len() as i64 },
-                            available_episodes_detail: detail,
-                        });
-                    }
-                }
-                }
+        let j = match anilist_post(client, &query, &json!({ "id": id_num }), Duration::from_secs(8)).await {
+            Ok(j) => j,
+            Err(e) => {
+                upstream_err = Some(e);
+                continue;
             }
+        };
+        let media = &j["data"]["Media"];
+        if media.is_null() {
+            continue;
         }
+        let title = &media["title"];
+        let name = title["english"]
+            .as_str()
+            .or_else(|| title["romaji"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let mal_id = media["idMal"].as_i64().map(|x| x.to_string()).unwrap_or_default();
+        let genres: Vec<String> = media["genres"].as_array().map(|a| a.iter().filter_map(|g| g.as_str().map(String::from)).collect()).unwrap_or_default();
+        // Real ids from AllAnime when it has the show; AniList's episode count
+        // (null on airing titles) only as a fallback.
+        let ep_count = media["episodes"].as_i64().unwrap_or(0);
+        let mut detail = AvailDetail {
+            sub: (1..=ep_count).map(|i| i.to_string()).collect(),
+            dub: (1..=ep_count).map(|i| i.to_string()).collect(),
+        };
+        // Canonical (AllAnime) id, so a watchlist entry written from any id
+        // namespace resolves on every route.
+        let mut show_id = anilist_id.to_string();
+        if let Some(aa) = avail_by_allanime_name(client, &name).await {
+            show_id = aa.id;
+            detail = aa.detail;
+        }
+        return Ok(Some(ShowDetail {
+            id: show_id,
+            name,
+            english_name: title["english"].as_str().map(String::from),
+            thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
+            description: strip_html(media["description"].as_str().unwrap_or("")),
+            status: media["status"].as_str().unwrap_or("").to_string(),
+            score: 0.0,
+            mal_id,
+            genres,
+            tags: vec![],
+            available_episodes: Avail { sub: detail.sub.len() as i64, dub: detail.dub.len() as i64 },
+            available_episodes_detail: detail,
+        }));
     }
-    None
+    match upstream_err {
+        Some(e) => Err(e),
+        None => Ok(None),
+    }
 }
 
-async fn resolve_title_fallback(client: &reqwest::Client, title: &str) -> Option<ShowDetail> {
+async fn resolve_title_fallback(client: &reqwest::Client, title: &str) -> Result<Option<ShowDetail>, String> {
     let body = json!({ "query": "query($search: String) { Page(perPage: 1) { media(search: $search, type: ANIME) { title { english romaji } idMal description coverImage { large } status genres episodes } } }", "variables": { "search": title } });
-    if let Ok(res) = client.post("https://graphql.anilist.co").json(&body).timeout(Duration::from_secs(8)).send().await {
-        if res.status().is_success() {
-            if let Ok(j) = res.json::<Value>().await {
-                let media = &j["data"]["Page"]["media"][0];
-                if !media.is_null() {
-                    let title_name = media["title"]["english"].as_str().or_else(|| media["title"]["romaji"].as_str()).unwrap_or(title);
-                    let genres: Vec<String> = media["genres"].as_array().map(|a| a.iter().filter_map(|g| g.as_str().map(String::from)).collect()).unwrap_or_default();
-                    let ep_count = media["episodes"].as_i64().unwrap_or(0);
-                    let mut detail = AvailDetail {
-                        sub: (1..=ep_count).map(|i| i.to_string()).collect(),
-                        dub: (1..=ep_count).map(|i| i.to_string()).collect(),
-                    };
-                    let mut show_id = String::new();
-                    if let Some(aa) = avail_by_allanime_name(client, title_name).await {
-                        show_id = aa.id;
-                        detail = aa.detail;
-                    }
-                    return Some(ShowDetail {
-                        id: show_id,
-                        name: title_name.to_string(),
-                        english_name: media["title"]["english"].as_str().map(String::from),
-                        thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
-                        description: strip_html(media["description"].as_str().unwrap_or("")),
-                        status: media["status"].as_str().unwrap_or("").to_string(),
-                        score: 0.0,
-                        mal_id: media["idMal"].as_i64().map(|x| x.to_string()).unwrap_or_default(),
-                        genres,
-                        tags: vec![],
-                        available_episodes: Avail { sub: detail.sub.len() as i64, dub: detail.dub.len() as i64 },
-                        available_episodes_detail: detail,
-                    });
-                }
-            }
-        }
+    let j = anilist_post(
+        client,
+        body["query"].as_str().unwrap_or(""),
+        &body["variables"],
+        Duration::from_secs(8),
+    )
+    .await?;
+    let media = &j["data"]["Page"]["media"][0];
+    if media.is_null() {
+        return Ok(None);
     }
-    None
+    let title_name = media["title"]["english"].as_str().or_else(|| media["title"]["romaji"].as_str()).unwrap_or(title);
+    let genres: Vec<String> = media["genres"].as_array().map(|a| a.iter().filter_map(|g| g.as_str().map(String::from)).collect()).unwrap_or_default();
+    let ep_count = media["episodes"].as_i64().unwrap_or(0);
+    let mut detail = AvailDetail {
+        sub: (1..=ep_count).map(|i| i.to_string()).collect(),
+        dub: (1..=ep_count).map(|i| i.to_string()).collect(),
+    };
+    let mut show_id = String::new();
+    if let Some(aa) = avail_by_allanime_name(client, title_name).await {
+        show_id = aa.id;
+        detail = aa.detail;
+    }
+    Ok(Some(ShowDetail {
+        id: show_id,
+        name: title_name.to_string(),
+        english_name: media["title"]["english"].as_str().map(String::from),
+        thumbnail: media["coverImage"]["large"].as_str().unwrap_or("").to_string(),
+        description: strip_html(media["description"].as_str().unwrap_or("")),
+        status: media["status"].as_str().unwrap_or("").to_string(),
+        score: 0.0,
+        mal_id: media["idMal"].as_i64().map(|x| x.to_string()).unwrap_or_default(),
+        genres,
+        tags: vec![],
+        available_episodes: Avail { sub: detail.sub.len() as i64, dub: detail.dub.len() as i64 },
+        available_episodes_detail: detail,
+    }))
 }
 
 pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl IntoResponse {
@@ -316,12 +338,19 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl 
     // 1. AllAnime getShow
     let mut show: Option<ShowDetail> = None;
     let mut mal_id = String::new();
-    if let Ok(data) = gql(&state.http, SHOW_GQL, json!({ "showId": id })).await {
-        if let Some(s) = data.get("show") {
-            if !s.is_null() {
-                show = Some(show_from_allanime(s, &id));
+    // Distinguishes "this id does not exist" (404) from "an upstream lookup
+    // failed" (503, retryable) so a rate-limit blip never reads as
+    // "anime not found".
+    let mut upstream_error: Option<String> = None;
+    match gql(&state.http, SHOW_GQL, json!({ "showId": id })).await {
+        Ok(data) => {
+            if let Some(s) = data.get("show") {
+                if !s.is_null() {
+                    show = Some(show_from_allanime(s, &id));
+                }
             }
         }
+        Err(e) => upstream_error = Some(e),
     }
 
     // 2. Kitsu
@@ -361,19 +390,27 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl 
 
     // 3. Numeric (AniList) id
     if show.is_none() && id.chars().all(|c| c.is_ascii_digit()) {
-        if let Some(s) = resolve_anilist_by_id(&state.http, &id).await {
-            show = Some(s);
+        match resolve_anilist_by_id(&state.http, &id).await {
+            Ok(Some(s)) => show = Some(s),
+            // AniList answered and the id doesn't exist — that's a real 404,
+            // even if AllAnime was down for the hash lookup above.
+            Ok(None) => upstream_error = None,
+            Err(e) => upstream_error = Some(e),
         }
     }
 
     // 4. Title fallback (client cache)
     if show.is_none() {
         if let Some(t) = &title_param {
-            if let Some(mut s) = resolve_title_fallback(&state.http, t).await {
-                // AllAnime id when the title matched one, else the request id
-                // (the client's "not found" test requires a non-empty _id).
-                if s.id.is_empty() { s.id = id.clone(); }
-                show = Some(s);
+            match resolve_title_fallback(&state.http, t).await {
+                Ok(Some(mut s)) => {
+                    // AllAnime id when the title matched one, else the request
+                    // id (the client's "not found" test requires a non-empty _id).
+                    if s.id.is_empty() { s.id = id.clone(); }
+                    show = Some(s);
+                }
+                Ok(None) => {}
+                Err(e) => upstream_error = Some(e),
             }
         }
     }
@@ -382,14 +419,10 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl 
     if let Some(s) = &show {
         if s.mal_id.is_empty() && !s.name.is_empty() {
             // best-effort: search AniList by name
-            let body = json!({ "query": "query($search: String) { Page(perPage: 1) { media(search: $search, type: ANIME) { idMal } } }", "variables": { "search": s.name } });
-            if let Ok(res) = state.http.post("https://graphql.anilist.co").json(&body).timeout(Duration::from_secs(8)).send().await {
-                if res.status().is_success() {
-                    if let Ok(j) = res.json::<Value>().await {
-                        if let Some(m) = j["data"]["Page"]["media"][0]["idMal"].as_i64() {
-                            mal_id = m.to_string();
-                        }
-                    }
+            let query = "query($search: String) { Page(perPage: 1) { media(search: $search, type: ANIME) { idMal } } }";
+            if let Ok(j) = anilist_post(&state.http, query, &json!({ "search": s.name }), Duration::from_secs(8)).await {
+                if let Some(m) = j["data"]["Page"]["media"][0]["idMal"].as_i64() {
+                    mal_id = m.to_string();
                 }
             }
         } else {
@@ -403,6 +436,14 @@ pub async fn handler(State(state): State<AppState>, Query(q): Query<Q>) -> impl 
             out.mal_id = if mal_id.is_empty() { s.mal_id.clone() } else { mal_id.clone() };
             (StatusCode::OK, Json(serde_json::to_value(&out).unwrap())).into_response()
         }
-        None => (StatusCode::NOT_FOUND, Json(json!({"error":"Show not found"}))).into_response(),
+        None => match upstream_error {
+            // We could not prove the id is wrong — say so instead of 404.
+            Some(e) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": format!("Anime lookup temporarily unavailable ({e})") })),
+            )
+                .into_response(),
+            None => (StatusCode::NOT_FOUND, Json(json!({"error":"Show not found"}))).into_response(),
+        },
     }
 }

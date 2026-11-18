@@ -14,7 +14,8 @@ const ANILIST_URL: &str = "https://graphql.anilist.co";
 const KITSU_MAP_URL: &str = "https://kitsu.io/api/edge/mappings";
 const KITSU_ANIME_URL: &str = "https://kitsu.io/api/edge/anime";
 
-const MEMO_MAX: usize = 100;
+const MEMO_MAX: usize = 500;
+const TEN_MIN: Duration = Duration::from_secs(10 * 60);
 const THIRTY_MIN: Duration = Duration::from_secs(30 * 60);
 const HOUR: Duration = Duration::from_secs(3600);
 const SIX_HOURS: Duration = Duration::from_secs(6 * 3600);
@@ -61,29 +62,78 @@ fn strip_html(s: &str) -> String {
     out
 }
 
-async fn anilist_post(
+// Shared POST path for every AniList query. Two things matter here:
+//   1. AniList rate-limits per IP (30 req/min). A watch page fires episodes,
+//      titles, relations, trailer and recommendations at once, so without a
+//      cache a second page load starts getting 429s — which used to surface
+//      as "anime not found". Cache identical read-only queries, and wait out
+//      one Retry-After window before giving up.
+//   2. Only successful responses are memoized, so a transient failure never
+//      gets pinned.
+pub async fn anilist_post(
     client: &reqwest::Client,
     query: &str,
     variables: &Value,
     timeout: Duration,
 ) -> Result<Value, String> {
+    let key = format!("gql:{}:{}", query, variables);
+    if let Some(hit) = memo_get(&key, TEN_MIN) {
+        return Ok(hit);
+    }
+
     let mut body = Map::new();
     body.insert("query".into(), json!(query));
     if !variables.is_null() {
         body.insert("variables".into(), variables.clone());
     }
-    let res = client
-        .post(ANILIST_URL)
-        .header("Content-Type", "application/json")
-        .json(&Value::Object(body))
-        .timeout(timeout)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("AniList {}", res.status()));
+    let payload = Value::Object(body);
+
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        let res = client
+            .post(ANILIST_URL)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .timeout(timeout)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = res.status();
+        if status.is_success() {
+            let j = res.json::<Value>().await.map_err(|e| e.to_string())?;
+            memo_set(&key, j.clone());
+            return Ok(j);
+        }
+        // AniList answers an unknown id with HTTP 404 + `data.Media: null`.
+        // That is a definitive "no such media", not an outage — surface it as
+        // a response so callers can 404 instead of showing "try again".
+        if status.as_u16() == 404 {
+            let j = res
+                .json::<Value>()
+                .await
+                .unwrap_or_else(|_| json!({ "data": null }));
+            memo_set(&key, j.clone());
+            return Ok(j);
+        }
+        last_err = format!("AniList {}", status);
+        let retryable = status.as_u16() == 429 || status.is_server_error();
+        if retryable && attempt == 0 {
+            let wait = if status.as_u16() == 429 {
+                res.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(1)
+                    .clamp(1, 2)
+            } else {
+                1
+            };
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            continue;
+        }
+        break;
     }
-    res.json::<Value>().await.map_err(|e| e.to_string())
+    Err(last_err)
 }
 
 async fn kitsu_get(client: &reqwest::Client, url: &str, timeout: Duration) -> Result<Value, String> {
@@ -259,18 +309,7 @@ pub async fn get_ani_trailer(
     } else {
         return Ok(Value::Null);
     };
-    let res = client
-        .post(ANILIST_URL)
-        .header("Content-Type", "application/json")
-        .json(&json!({ "query": query, "variables": vars }))
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("AniList {}", res.status()));
-    }
-    let j: Value = res.json().await.map_err(|e| e.to_string())?;
+    let j = anilist_post(client, &query, &vars, Duration::from_secs(8)).await?;
     let trailer = &j["data"]["Media"]["trailer"];
     if trailer.is_null() {
         return Ok(Value::Null);
@@ -297,18 +336,7 @@ pub async fn get_ani_recommendations(
     } else {
         return Ok(vec![]);
     };
-    let res = client
-        .post(ANILIST_URL)
-        .header("Content-Type", "application/json")
-        .json(&json!({ "query": query, "variables": vars }))
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !res.status().is_success() {
-        return Err(format!("AniList {}", res.status()));
-    }
-    let j: Value = res.json().await.map_err(|e| e.to_string())?;
+    let j = anilist_post(client, &query, &vars, Duration::from_secs(8)).await?;
     let nodes = j["data"]["Media"]["recommendations"]["nodes"]
         .as_array()
         .cloned()
@@ -546,21 +574,9 @@ pub async fn ani_streaming_episode_titles(
     } else {
         return out;
     };
-    let body = json!({ "query": query, "variables": variables });
-    let res = match client
-        .post("https://graphql.anilist.co")
-        .json(&body)
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(_) => return out,
-    };
-    if !res.status().is_success() {
-        return out;
-    }
-    let j: Value = match res.json().await {
+    // Shares the memo/retry path: episode titles are requested for every show
+    // page, so a separate uncached call here doubles the 429 pressure.
+    let j = match anilist_post(client, &query, &variables, Duration::from_secs(8)).await {
         Ok(v) => v,
         Err(_) => return out,
     };
