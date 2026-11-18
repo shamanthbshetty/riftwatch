@@ -115,7 +115,7 @@ pub async fn search_ani_list(client: &reqwest::Client, query: &str) -> Result<Ve
         client,
         ANI_SEARCH_QUERY,
         &json!({ "search": query }),
-        Duration::from_secs(8),
+        Duration::from_secs(4),
     )
     .await?;
     let media = j["data"]["Page"]["media"].as_array().cloned().unwrap_or_default();

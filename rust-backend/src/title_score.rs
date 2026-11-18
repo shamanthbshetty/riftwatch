@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 // Shared title ranking for provider search (port of src/lib/title-score.ts).
 // All three providers (anikoto, aniwatch, kenjitsu) rank candidates with this
 // instead of trusting the first hit, so a variant/romaji title cannot hijack
@@ -53,17 +55,21 @@ const SEASON_BONUS: i32 = 250;
 const SEASON_PENALTY: i32 = 250;
 
 /// Extract a season number from NORMALIZED text ("… season 2", "… s2").
+static RE_SEASON: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\bseason\s*(\d{1,2})\b").unwrap());
+static RE_NTH_SEASON: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\b(\d{1,2})(?:st|nd|rd|th)\s+season\b").unwrap());
+static RE_S: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\bs(\d{1,2})\b").unwrap());
+
 fn season_of(normalized: &str) -> Option<u32> {
-    let re = regex::Regex::new(r"\bseason\s*(\d{1,2})\b").unwrap();
-    if let Some(c) = re.captures(normalized) {
+    if let Some(c) = RE_SEASON.captures(normalized) {
         return c[1].parse().ok();
     }
-    let re = regex::Regex::new(r"\b(\d{1,2})(?:st|nd|rd|th)\s+season\b").unwrap();
-    if let Some(c) = re.captures(normalized) {
+    if let Some(c) = RE_NTH_SEASON.captures(normalized) {
         return c[1].parse().ok();
     }
-    let re = regex::Regex::new(r"\bs(\d{1,2})\b").unwrap();
-    re.captures(normalized).and_then(|c| c[1].parse().ok())
+    RE_S.captures(normalized).and_then(|c| c[1].parse().ok())
 }
 
 // Format words identify WHICH work of a franchise a title is. They carry no

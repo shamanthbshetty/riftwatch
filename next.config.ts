@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
   },
   allowedDevOrigins: ["172.28.16.1"],
   async rewrites() {
-    const rust = process.env.RUST_PROXY_URL || "http://localhost:3001";
+    const rust = process.env.RUST_PROXY_URL || "http://127.0.0.1:3001";
     return [
       // All /api/* is served by the Rust backend (single binary, no Node runtime).
       { source: "/api/:path*", destination: `${rust}/api/:path*` },

@@ -23,8 +23,8 @@ const TITLE_CACHE_MAX: usize = 1000;
 
 // Lookups are capped + bounded-parallel: 40 sequential AniList/Kitsu lookups
 // made every search take 12-40 s, all at once burns the rate limit.
-const TITLE_LOOKUP_CONCURRENCY: usize = 5;
-const TITLE_LOOKUP_LIMIT: usize = 12;
+const TITLE_LOOKUP_CONCURRENCY: usize = 8;
+const TITLE_LOOKUP_LIMIT: usize = 0;
 
 #[derive(Clone)]
 pub struct ShowName {
@@ -225,7 +225,7 @@ async fn resolve_english_title(name: &str) -> Option<String> {
         .post(ANILIST_URL)
         .header("Content-Type", "application/json")
         .json(&body)
-        .timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(3))
         .send()
         .await
     {
@@ -249,7 +249,7 @@ async fn resolve_english_title(name: &str) -> Option<String> {
         if let Ok(res) = http()
             .get(&url)
             .header("Accept", "application/vnd.api+json")
-            .timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(3))
             .send()
             .await
         {
