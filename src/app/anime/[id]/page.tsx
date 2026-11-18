@@ -382,16 +382,22 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
                 subCount={subCount}
                 dubCount={dubCount}
               />
-              {trailerKey && (
-                <button
-                  type="button"
-                  onClick={() => setTrailerOpen(true)}
-                  className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors border border-border"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  Trailer
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (trailerKey) setTrailerOpen(true);
+                  else
+                    window.open(
+                      `https://www.youtube.com/results?search_query=${encodeURIComponent((show?.englishName || show?.name || "") + " trailer")}`,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                }}
+                className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors border border-border"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                Trailer
+              </button>
               <WatchlistStatusButton
                 inList={inWatchlist}
                 status={wlStatus}
@@ -446,14 +452,14 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
           onClick={() => setTrailerOpen(false)}
         >
-          <div className="relative w-full max-w-4xl aspect-video" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full max-w-4xl max-h-[85vh] aspect-video" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               onClick={() => setTrailerOpen(false)}
-              className="absolute -top-10 right-0 text-white/80 hover:text-white"
+              className="absolute top-2 right-2 z-10 flex items-center justify-center w-8 h-8 rounded-full bg-black/60 text-white/90 hover:text-white hover:bg-black/80 transition-colors"
               aria-label="Close trailer"
             >
-              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
             <iframe
               src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
