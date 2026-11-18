@@ -169,6 +169,15 @@ pub async fn credits(client: &reqwest::Client, is_tv: bool, id: &str) -> Result<
     tmdb_fetch(client, &path, &[]).await
 }
 
+pub async fn videos(client: &reqwest::Client, is_tv: bool, id: &str) -> Result<Value, String> {
+    let path = if is_tv {
+        format!("/tv/{}/videos", id)
+    } else {
+        format!("/movie/{}/videos", id)
+    };
+    tmdb_fetch(client, &path, &[]).await
+}
+
 /// TMDB "More like this" — media_type tagged so links hit the right detail URL.
 pub async fn recommendations(
     client: &reqwest::Client,

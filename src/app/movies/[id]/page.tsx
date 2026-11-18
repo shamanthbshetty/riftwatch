@@ -89,6 +89,29 @@ export default function MovieDetailPage() {
   }, [id, type, key]);
   const recs = recsState?.key === key ? recsState.list : EMPTY_RECS;
 
+  // Trailer (TMDB videos)
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/movies/videos?id=${encodeURIComponent(id)}&type=${type}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const vids = Array.isArray(data?.results) ? data.results : [];
+        const pick =
+          vids.find((v: { site?: string; type?: string }) => v.site === "YouTube" && v.type === "Trailer") ||
+          vids.find((v: { site?: string }) => v.site === "YouTube");
+        setTrailerKey(pick?.key ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setTrailerKey(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, type]);
+
   if (loading) {
     return (
       <div className="page-top">
@@ -217,6 +240,16 @@ export default function MovieDetailPage() {
                   ))}
                 </>
               )}
+              {trailerKey && (
+                <button
+                  type="button"
+                  onClick={() => setTrailerOpen(true)}
+                  className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground font-semibold px-4 py-2 rounded-lg text-sm transition-colors border border-border"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  Trailer
+                </button>
+              )}
               <WatchlistStatusButton
                 inList={inWatchlist}
                 status={wlStatus}
@@ -267,6 +300,32 @@ export default function MovieDetailPage() {
             ))}
           </Rail>
         </section>
+      )}
+
+      {/* Trailer modal */}
+      {trailerOpen && trailerKey && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setTrailerOpen(false)}
+        >
+          <div className="relative w-full max-w-4xl aspect-video" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setTrailerOpen(false)}
+              className="absolute -top-10 right-0 text-white/80 hover:text-white"
+              aria-label="Close trailer"
+            >
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            <iframe
+              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+              title="Trailer"
+              className="w-full h-full rounded-lg"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
       )}
     </div>
   );

@@ -161,6 +161,19 @@ pub async fn recommendations(
     }
 }
 
+pub async fn videos(State(state): State<AppState>, Query(q): Query<QDetails>) -> impl IntoResponse {
+    let id = q.id.as_deref().map_or(0.0, js_number);
+    if id == 0.0 || id.is_nan() {
+        return bad_request("id required");
+    }
+    let is_tv = q.typ.as_deref() == Some("tv");
+    let path_id = js_int_str(id);
+    match tmdb::videos(&state.http, is_tv, &path_id).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => upstream_err(e),
+    }
+}
+
 pub async fn search(State(state): State<AppState>, Query(q): Query<QSearch>) -> impl IntoResponse {
     let query = match q.q {
         Some(s) if !s.is_empty() => s,

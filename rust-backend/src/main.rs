@@ -1,8 +1,7 @@
 use axum::{
     Router,
-    routing::{get, post},
-    http::StatusCode,
-    response::{IntoResponse, Response, Json},
+    routing::get,
+    response::{IntoResponse, Json},
     extract::State,
 };
 use serde_json::json;
@@ -69,11 +68,14 @@ async fn main() {
         .route("/api/movies/top-rated", get(routes::movies_api::top_rated))
         .route("/api/movies/trending", get(routes::movies_api::trending))
         .route("/api/movies/tv-episodes", get(routes::movies_api::tv_episodes))
+        .route("/api/movies/videos", get(routes::movies_api::videos))
         .route("/api/movies/stream", get(routes::movies_api::stream))
         // Anime discovery JSON API (was Next.js route handlers)
         .route("/api/health", get(routes::anime_api::health))
         .route("/api/jikan-anime", get(routes::anime_api::jikan_anime))
         .route("/api/relations", get(routes::anime_api::relations))
+        .route("/api/anime/trailer", get(routes::anime_api::trailer))
+        .route("/api/anime/recommendations", get(routes::anime_api::recommendations))
         .route("/api/titles", get(routes::anime_api::titles))
         .route("/api/schedule", get(routes::anime_api::schedule))
         .route("/api/search", get(routes::anime_api::search))

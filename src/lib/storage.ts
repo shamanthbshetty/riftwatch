@@ -675,11 +675,45 @@ export function exportData(): string {
     movieWatchlist: getMovieWatchlist(),
     movieHistory: getMovieHistory(),
     movieNotifications: getMovieNotifications(),
+    // Everything below was added after v1 shipped; importData skips missing
+    // fields so old backups still load. Kept at version 1 on purpose.
+    resumePositions: get<Record<string, unknown>>(RESUME_KEY) ?? {},
+    prefs: {
+      autoplay: getAutoplayPref(),
+      autoSkip: getSkipPref(),
+      resume: getResumePref(),
+    },
+    epCache: getEpCache(),
+    tvEpCache: getTVEpCache(),
+    theme: getTheme(),
   }, null, 2);
 }
 
 function isItemArray(v: unknown): v is Record<string, unknown>[] {
   return Array.isArray(v) && v.every((i) => i !== null && typeof i === "object");
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// Resume entries are { t: seconds, at: epochMs, d?: seconds }. Anything else
+// would be read by getResumePos() and fed to the player as a seek target.
+function isResumeMap(v: unknown): boolean {
+  if (!isPlainObject(v)) return false;
+  return Object.values(v).every(
+    (e) => isPlainObject(e) && typeof e.t === "number" && typeof e.at === "number"
+  );
+}
+
+// ep-cache values are either a plain count or { sub, dub }.
+function isEpCache(v: unknown): boolean {
+  if (!isPlainObject(v)) return false;
+  return Object.values(v).every(
+    (e) =>
+      typeof e === "number" ||
+      (isPlainObject(e) && typeof e.sub === "number" && typeof e.dub === "number")
+  );
 }
 
 export function importData(json: string): { ok: boolean; error?: string } {
@@ -702,6 +736,44 @@ export function importData(json: string): { ok: boolean; error?: string } {
       if (!isItemArray(v)) return { ok: false, error: `Invalid "${field}" section` };
       set(key, v);
     }
+
+    // Optional extras — same skip-if-absent rule as the lists above, so a
+    // pre-extension backup imports cleanly.
+    const resume = data.resumePositions;
+    if (resume !== undefined && resume !== null) {
+      if (!isResumeMap(resume)) return { ok: false, error: 'Invalid "resumePositions" section' };
+      set(RESUME_KEY, resume);
+    }
+    const epCache = data.epCache;
+    if (epCache !== undefined && epCache !== null) {
+      if (!isEpCache(epCache)) return { ok: false, error: 'Invalid "epCache" section' };
+      set("ep-cache", epCache);
+    }
+    const tvEpCache = data.tvEpCache;
+    if (tvEpCache !== undefined && tvEpCache !== null) {
+      if (
+        !isPlainObject(tvEpCache) ||
+        !Object.values(tvEpCache).every((e) => typeof e === "number")
+      ) {
+        return { ok: false, error: 'Invalid "tvEpCache" section' };
+      }
+      set("tv-ep-cache", tvEpCache);
+    }
+    const prefs = data.prefs;
+    if (prefs !== undefined && prefs !== null) {
+      if (!isPlainObject(prefs)) return { ok: false, error: 'Invalid "prefs" section' };
+      if (typeof prefs.autoplay === "boolean") setAutoplayPref(prefs.autoplay);
+      if (typeof prefs.autoSkip === "boolean") setSkipPref(prefs.autoSkip);
+      if (typeof prefs.resume === "boolean") setResumePref(prefs.resume);
+    }
+    const theme = data.theme;
+    if (theme !== undefined && theme !== null) {
+      if (theme !== "dark" && theme !== "light") {
+        return { ok: false, error: 'Invalid "theme" section' };
+      }
+      setTheme(theme);
+    }
+
     // Snapshots are cached — without this every mounted view keeps rendering
     // the pre-import list until a full reload.
     refreshStore();

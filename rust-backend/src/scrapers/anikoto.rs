@@ -266,7 +266,7 @@ async fn resolve_episode(
             .map(str::to_string)
             .ok_or_else(|| format!("Episode {} not found", ep))?;
         // Drop non-Send parse state before returning.
-        drop(target);
+        let _ = target;
         ids
     };
 

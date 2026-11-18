@@ -339,15 +339,12 @@ function WatchContent() {
                 const last = getLastWatched(id);
                 if (last?.title) recoveredTitle = last.title;
               }
-            } catch (e) { console.log("RECOVERY ERR", String(e)); }
-            console.log("RECOVERY attempt=2 recoveredTitle=", recoveredTitle);
+            } catch { /* ignore */ }
             if (recoveredTitle) {
               try {
                 const r2 = await fetch(`/api/episodes?id=${encodeURIComponent(id)}&title=${encodeURIComponent(recoveredTitle)}`);
-                console.log("RECOVERY r2 status=", r2.status);
                 if (r2.ok) {
                   const d2 = await r2.json();
-                  console.log("RECOVERY d2._id=", d2?._id, "name=", d2?.name);
                   if (d2?.name) {
                     // re-run the success path by treating d2 as d
                     // (fall through to normal handling below by assigning)

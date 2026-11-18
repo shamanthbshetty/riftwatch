@@ -1,15 +1,13 @@
 use axum::{
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     body::Body,
 };
-use bytes::Bytes;
-use futures::StreamExt;
 use serde::Deserialize;
 use std::time::Duration;
-
 use crate::AppState;
+use bytes::Bytes;
 
 #[derive(Deserialize)]
 pub struct ProxyQuery {
@@ -18,16 +16,11 @@ pub struct ProxyQuery {
     pub origin: Option<String>,
 }
 
+const DEFAULT_REFERER: &str = "https://megaplay.buzz/";
+const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const MAX_ATTEMPTS: u32 = 2;
 const HEAD_TARGET_BYTES: usize = 512;
-const MAX_PLAYLIST_BYTES: usize = 15_000_000;
-const PLAYLIST_DEADLINE_SECS: u64 = 30;
-const SEGMENT_MAX_BYTES: usize = 400_000_000;
-const HEAD_TIMEOUT_SECS: u64 = 15;
-const KEY_BODY_MAX_BYTES: usize = 32;
-const MAX_ATTEMPTS: u8 = 2;
-
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
-const DEFAULT_REFERER: &str = "https://vidlink.pro/";
+const KEY_BODY_MAX_BYTES: usize = 1_000_000;
 
 pub async fn handler(
     State(state): State<AppState>,
@@ -51,10 +44,9 @@ pub async fn handler(
         h
     };
 
-    // Fetch with retries
+    let mut last_err: Option<String> = None;
     let mut sniff_bytes: Option<bytes::Bytes> = None;
     let mut content_type = String::new();
-    let mut last_err: Option<String> = None;
 
     for attempt in 0..MAX_ATTEMPTS {
         match state.http.get(&q.url).headers(headers()).send().await {
@@ -69,57 +61,13 @@ pub async fn handler(
                 }
                 content_type = res.headers().get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-                // sniff head
-                let mut body = res.bytes_stream();
-                let mut collected: Vec<u8> = Vec::new();
-                let mut complete = false;
-                let mut reader_done = false;
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(HEAD_TIMEOUT_SECS);
-                let mut leftover: Option<bytes::Bytes> = None;
-                loop {
-                    if collected.len() >= HEAD_TARGET_BYTES { break; }
-                    if tokio::time::Instant::now() > deadline {
-                        last_err = Some("upstream head timeout".into());
-                        break;
+                match res.bytes().await {
+                    Ok(b) => { sniff_bytes = Some(b); }
+                    Err(e) => {
+                        last_err = Some(e.to_string());
+                        if attempt < MAX_ATTEMPTS - 1 { tokio::time::sleep(Duration::from_millis(500*(attempt as u64+1))).await; continue; }
+                        return (StatusCode::BAD_GATEWAY, "m3u8-proxy error").into_response();
                     }
-                    match tokio::time::timeout(Duration::from_secs(HEAD_TIMEOUT_SECS), body.next()).await {
-                        Ok(Some(Ok(chunk))) => {
-                            collected.extend_from_slice(&chunk);
-                            if collected.len() >= HEAD_TARGET_BYTES { 
-                                // keep remainder? We already consumed into collected beyond target; 
-                                // For streaming we need the rest. Simpler: store whole collected as head, 
-                                // and we lost the stream. To preserve streaming, we'd keep the stream.
-                                // For correctness of proxy, we buffer head only then stream rest.
-                                // Here we've over-read; acceptable for segments? No—need rest.
-                                // We'll store collected as head and mark complete=false with no reader -> 
-                                // for segments we can't stream rest. 
-                                // TODO: refactor to keep stream. For now, treat collected as full body for small.
-                                break;
-                            }
-                        }
-                        Ok(Some(Err(e))) => { last_err = Some(e.to_string()); break; }
-                        Ok(None) => { complete = true; break; }
-                        Err(_) => { last_err = Some("head timeout".into()); break; }
-                    }
-                }
-                // NOTE: this simplified version buffers the head and, for segments, 
-                // we no longer have the stream. To keep streaming we'd need to 
-                // tee the stream. For Phase 1 correctness we buffer entire body 
-                // for segments too (segments are ~2-4MB, fine for now) and re-stream.
-                // Fetch full body for segment mode.
-                // Re-fetch full body:
-                // (We already consumed partial; fetch again fully for simplicity.)
-                let full = state.http.get(&q.url).headers(headers()).send().await;
-                if let Ok(r2) = full {
-                    if let Ok(b) = r2.bytes().await {
-                        sniff_bytes = Some(b);
-                    }
-                }
-                // if sniff_bytes None, error
-                if sniff_bytes.is_none() {
-                    last_err = Some("failed to read body".into());
-                    if attempt < MAX_ATTEMPTS - 1 { tokio::time::sleep(Duration::from_millis(500*(attempt as u64+1))).await; continue; }
-                    return (StatusCode::BAD_GATEWAY, "m3u8-proxy error").into_response();
                 }
                 break;
             }
@@ -142,18 +90,14 @@ pub async fn handler(
     let latin_head = String::from_utf8_lossy(head);
     let manifest_ct = content_type.to_lowercase().contains("mpegurl") || content_type.to_lowercase().contains("dash+xml");
 
-    // classify
     let mut mode = classify(&body, &latin_head, manifest_ct, body.len() <= KEY_BODY_MAX_BYTES);
 
-    // reject -> retry once
     if mode == Mode::Reject {
-        // one retry
         if let Ok(res) = state.http.get(&q.url).headers(headers()).send().await {
             if res.status().is_success() {
                 if let Ok(b) = res.bytes().await {
                     let rh = String::from_utf8_lossy(&b[..b.len().min(1024)]);
                     if !looks_like_error_text(&rh) || rh.contains("#EXTM3U") {
-                        sniff_bytes = Some(b.clone());
                         body = b;
                         let lh = String::from_utf8_lossy(&body[..body.len().min(1024)]);
                         if lh.contains("#EXTM3U") || manifest_ct { mode = Mode::Playlist; }
@@ -178,7 +122,6 @@ pub async fn handler(
         return resp;
     }
 
-    // segment
     let ct = if content_type.to_lowercase().starts_with("video/") || content_type.to_lowercase().starts_with("audio/") {
         content_type.clone()
     } else {
@@ -231,7 +174,6 @@ fn origin_of(url: &str) -> Option<String> {
 }
 
 async fn is_safe_url(url: &str) -> bool {
-    // basic: http/https only; block obvious private hosts
     if !url.starts_with("http://") && !url.starts_with("https://") { return false; }
     true
 }
@@ -260,7 +202,6 @@ fn rewrite_urls(m3u8: &str, base_url: &str, referer: &str, origin: &str) -> Stri
         format!("{}{}", base, trimmed)
     };
 
-    // pass 1: standalone non-tag lines
     let mut result = String::new();
     for line in m3u8.lines() {
         let trimmed = line.trim();
@@ -273,12 +214,10 @@ fn rewrite_urls(m3u8: &str, base_url: &str, referer: &str, origin: &str) -> Stri
         result.push_str(&proxied(&resolved));
         result.push('\n');
     }
-    // pass 2: URI="..." inside tags
     let re = regex::Regex::new(r#"URI="([^"]+)""#).unwrap();
-    result = re.replace_all(&result, |caps: &regex::Captures| {
+    re.replace_all(&result, |caps: &regex::Captures| {
         let uri = &caps[1];
         let resolved = resolve(uri);
         format!(r#"URI="{}""#, proxied(&resolved))
-    }).to_string();
-    result
+    }).to_string()
 }

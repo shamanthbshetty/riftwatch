@@ -73,9 +73,12 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
     relations: Relation[];
   } | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [trailerState, setTrailerState] = useState<{ seed: string; key: string | null } | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
 
   const current = loaded?.key === key ? loaded : null;
   const show = current?.show ?? null;
+  const trailerKey = trailerState?.seed === (show?.malId || id) ? trailerState.key : null;
   const watchedUpTo = useWatchedUpTo(show?._id || id, mode);
   const titles = current?.titles ?? EMPTY_TITLES;
   const schedule = current?.schedule ?? null;
@@ -147,6 +150,31 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
       cancelled = true;
     };
   }, [id, key]);
+
+  // Trailer (AniList)
+  useEffect(() => {
+    let cancelled = false;
+    const seed = show?.malId || id;
+    const fetchTrailer = (params: string) =>
+      fetch(`/api/anime/trailer?${params}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (cancelled) return;
+          const k = d?.site === "youtube" && d?.id ? d.id : null;
+          setTrailerState({ seed, key: k });
+        })
+        .catch(() => {
+          if (!cancelled) setTrailerState({ seed, key: null });
+        });
+    if (show?.malId) {
+      fetchTrailer(`malId=${encodeURIComponent(show.malId)}`);
+    } else if (/^\d+$/.test(id)) {
+      fetchTrailer(`id=${encodeURIComponent(id)}`);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [show?.malId, id]);
 
   function addWithStatus(status: WatchStatus) {
     if (!show) return;
@@ -332,6 +360,16 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
                 subCount={subCount}
                 dubCount={dubCount}
               />
+              {trailerKey && (
+                <button
+                  type="button"
+                  onClick={() => setTrailerOpen(true)}
+                  className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors border border-border"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  Trailer
+                </button>
+              )}
               <WatchlistStatusButton
                 inList={inWatchlist}
                 status={wlStatus}
@@ -378,6 +416,32 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
             ))}
           </Rail>
         </section>
+      )}
+
+      {/* Trailer modal */}
+      {trailerOpen && trailerKey && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setTrailerOpen(false)}
+        >
+          <div className="relative w-full max-w-4xl aspect-video" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setTrailerOpen(false)}
+              className="absolute -top-10 right-0 text-white/80 hover:text-white"
+              aria-label="Close trailer"
+            >
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            <iframe
+              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+              title="Trailer"
+              className="w-full h-full rounded-lg"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
       )}
     </div>
   );

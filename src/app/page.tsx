@@ -9,6 +9,7 @@ import TrendingCarousel from "@/components/TrendingCarousel";
 import TopRated from "@/components/TopRated";
 import MostPopular from "@/components/MostPopular";
 import ContinueWatching from "@/components/ContinueWatching";
+import BecauseYouWatched from "@/components/BecauseYouWatched";
 import ScheduleSection from "@/components/ScheduleSection";
 import MoviesSection from "@/components/MoviesSection";
 import ContinueWatchingMovies from "@/components/ContinueWatchingMovies";
@@ -134,6 +135,7 @@ function HomeContent() {
 
       <div className={`${PAGE} relative z-10 -mt-8 space-y-14`}>
         <ContinueWatching />
+        <BecauseYouWatched />
 
         <TrendingCarousel />
         <MostPopular />

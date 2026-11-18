@@ -222,6 +222,34 @@ pub async fn relations(State(state): State<AppState>, Query(q): Query<RelQ>) -> 
     Json(json!({ "relations": rels })).into_response()
 }
 
+// ── /api/anime/trailer ──
+pub async fn trailer(State(state): State<AppState>, Query(q): Query<RelQ>) -> impl IntoResponse {
+    let id = parse_id(&q.id);
+    let mal_id = parse_id(&q.mal_id);
+    match anilist::get_ani_trailer(&state.http, id, mal_id).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("Error: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+// ── /api/anime/recommendations ──
+pub async fn recommendations(State(state): State<AppState>, Query(q): Query<RelQ>) -> impl IntoResponse {
+    let id = parse_id(&q.id);
+    let mal_id = parse_id(&q.mal_id);
+    match anilist::get_ani_recommendations(&state.http, id, mal_id).await {
+        Ok(v) => Json(json!({ "results": v })).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("Error: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
 // ── /api/titles ──
 
 #[derive(Deserialize)]

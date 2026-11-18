@@ -240,6 +240,105 @@ async fn fetch_relations(client: &reqwest::Client, vars: Value) -> Result<Vec<Va
     Ok(out)
 }
 
+// ── Trailer (AniList Media.trailer) ──
+pub async fn get_ani_trailer(
+    client: &reqwest::Client,
+    id: Option<u64>,
+    mal_id: Option<u64>,
+) -> Result<Value, String> {
+    let (query, vars) = if let Some(v) = id.filter(|v| *v > 0) {
+        (
+            r#"query($id: Int) { Media(id: $id, type: ANIME) { trailer { id site } } }"#.to_string(),
+            json!({ "id": v }),
+        )
+    } else if let Some(v) = mal_id.filter(|v| *v > 0) {
+        (
+            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { trailer { id site } } }"#.to_string(),
+            json!({ "idMal": v }),
+        )
+    } else {
+        return Ok(Value::Null);
+    };
+    let res = client
+        .post(ANILIST_URL)
+        .header("Content-Type", "application/json")
+        .json(&json!({ "query": query, "variables": vars }))
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("AniList {}", res.status()));
+    }
+    let j: Value = res.json().await.map_err(|e| e.to_string())?;
+    let trailer = &j["data"]["Media"]["trailer"];
+    if trailer.is_null() {
+        return Ok(Value::Null);
+    }
+    Ok(trailer.clone())
+}
+
+// ── Recommendations (AniList Media.recommendations) ──
+pub async fn get_ani_recommendations(
+    client: &reqwest::Client,
+    id: Option<u64>,
+    mal_id: Option<u64>,
+) -> Result<Vec<Value>, String> {
+    let (query, vars) = if let Some(v) = id.filter(|v| *v > 0) {
+        (
+            r#"query($id: Int) { Media(id: $id, type: ANIME) { recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } } } } } }"#.to_string(),
+            json!({ "id": v }),
+        )
+    } else if let Some(v) = mal_id.filter(|v| *v > 0) {
+        (
+            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } } } } } }"#.to_string(),
+            json!({ "idMal": v }),
+        )
+    } else {
+        return Ok(vec![]);
+    };
+    let res = client
+        .post(ANILIST_URL)
+        .header("Content-Type", "application/json")
+        .json(&json!({ "query": query, "variables": vars }))
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("AniList {}", res.status()));
+    }
+    let j: Value = res.json().await.map_err(|e| e.to_string())?;
+    let nodes = j["data"]["Media"]["recommendations"]["nodes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in nodes {
+        let m = &node["mediaRecommendation"];
+        if m.is_null() {
+            continue;
+        }
+        let rid = m["id"].as_i64().unwrap_or(0);
+        if rid == 0 || !seen.insert(rid) {
+            continue;
+        }
+        let title = m["title"]["english"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| m["title"]["romaji"].as_str().filter(|s| !s.is_empty()))
+            .unwrap_or("")
+            .to_string();
+        let thumbnail = m["coverImage"]["large"].as_str().unwrap_or("").to_string();
+        out.push(json!({ "id": rid, "title": title, "thumbnail": thumbnail }));
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 // ── Schedule (replaces jikan getAnimeSchedule) ──
 
 const SCHEDULE_QUERY: &str = "query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { status nextAiringEpisode { airingAt episode } } }";
