@@ -48,9 +48,6 @@ const GENERIC: &[&str] = &[
     "and", "to", "in", "on", "for", "with", "by", "s1", "s2", "s3", "s4", "s5",
 ];
 
-// Below this a candidate is a near-miss, not the requested show.
-pub const MIN_SCORE: i32 = 200;
-
 const SEASON_BONUS: i32 = 250;
 const SEASON_PENALTY: i32 = 250;
 
@@ -82,7 +79,7 @@ const FORMAT: &[&str] = &[
     "movie", "movies", "ova", "ovas", "ona", "onas", "special", "specials",
 ];
 // Both sides agree on the work's format → boost; the query names a format the
-// candidate lacks (or a different one) → push below MIN_SCORE so a franchise's
+// candidate lacks (or a different one) → push the score far down so a franchise's
 // TV entry can never stand in for its movie. A candidate that merely ADDS a
 // format word the query didn't say ("Mugen Train" → "Mugen Train the Movie")
 // only gets a nudge — that's ordinary provider naming, not a different work.
@@ -163,4 +160,82 @@ fn base_score(q: &str, c: &str) -> i32 {
     }
 
     score.round() as i32
+}
+
+// ── Identity matching for the stream/episode fetchers ──
+// The playback path resolves a show by its AniList/MAL/provider id, so it only
+// needs to tell the right work apart from a provider's title search — not rank
+// by similarity. `identity_rank` is a deterministic replacement for the fuzzy
+// `score_title` heuristic: exact title first, then the same base work
+// (season-aware), then a word-boundary prefix. It returns None for anything
+// that cannot be the requested show, so a provider can never hand back a
+// spin-off as a substitute.
+
+static RE_SEASON_PAT: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"\s*\b(?:season|cour|part)\s*\d{1,2}(?:st|nd|rd|th)?\b|\s*\b\d{1,2}(?:st|nd|rd|th)\s+(?:season|cour|part)\b|\s*\bs\d{1,2}\b|\s+\d{1,2}$",
+    )
+    .unwrap()
+});
+
+/// Remove season markers from a NORMALIZED title so every season of one work
+/// shares a base ("naruto season 2" → "naruto").
+fn strip_season(norm: &str) -> String {
+    RE_SEASON_PAT
+        .replace_all(norm, " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// How a provider candidate relates to the target title. Lower is better;
+/// -1 means "not the requested work" (drop it).
+/// 0 exact · 1 same base + season · 2 same base, other season · 3 prefix
+pub fn identity_rank(target: &str, candidate: &str) -> i32 {
+    let t = normalize(target);
+    let c = normalize(candidate);
+    if t.is_empty() || c.is_empty() {
+        return -1;
+    }
+    if t == c {
+        return 0;
+    }
+    let tb = strip_season(&t);
+    let cb = strip_season(&c);
+    if !tb.is_empty() && tb == cb {
+        let ts = season_of(&t);
+        let cs = season_of(&c);
+        // Same base but a conflicting explicit season is a different work.
+        if ts.is_some() && cs.is_some() && ts != cs {
+            return 2;
+        }
+        return 1;
+    }
+    let (short, long) = if tb.len() <= cb.len() {
+        (&tb, &cb)
+    } else {
+        (&cb, &tb)
+    };
+    if !short.is_empty() && long.starts_with(short) {
+        let rest = &long[short.len()..];
+        if rest.is_empty() || rest.starts_with(' ') {
+            return 3;
+        }
+    }
+    -1
+}
+
+/// Order candidate indices best-first, dropping non-matches. Ties keep the
+/// provider's original result order so resolution stays deterministic.
+pub fn rank_candidates(target: &str, titles: &[String]) -> Vec<usize> {
+    let mut scored: Vec<(i32, usize)> = titles
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let r = identity_rank(target, t);
+            (r >= 0).then_some((r, i))
+        })
+        .collect();
+    scored.sort_by_key(|&(r, i)| (r, i));
+    scored.into_iter().map(|(_, i)| i).collect()
 }

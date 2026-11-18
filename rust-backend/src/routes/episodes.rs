@@ -201,13 +201,17 @@ struct AllanimeMatch { id: String, detail: AvailDetail }
 
 async fn avail_by_allanime_name(client: &reqwest::Client, name: &str) -> Option<AllanimeMatch> {
     if name.trim().is_empty() { return None; }
-    let lower = name.trim().to_lowercase();
-    let gid = search_anime(client, name).await.into_iter().find_map(|r| {
-        let rn = r["name"].as_str().unwrap_or("");
-        if rn.is_empty() { return None; }
-        let rl = rn.to_lowercase();
-        if rl.contains(&lower) || lower.contains(&rl) { r["_id"].as_str().map(String::from) } else { None }
-    })?;
+    let results = search_anime(client, name).await;
+    // Identity-match the rows against the target title (exact → same base →
+    // prefix) instead of a loose substring test that a spin-off could satisfy.
+    let titles: Vec<String> = results
+        .iter()
+        .map(|r| {
+            let en = r["englishName"].as_str().unwrap_or("").trim();
+            if en.is_empty() { r["name"].as_str().unwrap_or("").to_string() } else { en.to_string() }
+        })
+        .collect();
+    let gid = results.get(*crate::title_score::rank_candidates(name, &titles).first()?)?["_id"].as_str()?.to_string();
     Some(AllanimeMatch { id: gid.clone(), detail: avail_by_allanime_id(client, &gid).await? })
 }
 

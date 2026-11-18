@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{env_list, parse_mirror_list};
 use crate::safe_url::is_safe_url;
-use crate::title_score::{score_title, MIN_SCORE};
+use crate::title_score::identity_rank;
 use scraper::{ElementRef, Html, Selector};
 
 use super::megaplay::extract_player_sources;
@@ -120,9 +120,9 @@ fn consider(
     if !seen.insert(href.to_string()) {
         return;
     }
-    let score = score_title(title, name);
-    if score >= MIN_SCORE {
-        candidates.push((href.to_string(), score));
+    let rank = identity_rank(title, name);
+    if rank >= 0 {
+        candidates.push((href.to_string(), rank));
     }
 }
 
@@ -186,7 +186,7 @@ async fn resolve_from_mirror(
             consider(node.attr("href"), &name, title, &mut seen, &mut candidates);
         }
     }
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.sort_by(|a, b| a.1.cmp(&b.1));
     candidates
     };
 
@@ -195,16 +195,16 @@ async fn resolve_from_mirror(
     }
 
     let mut last_error = "No matching series".to_string();
-    // Walk ranked candidates; a show's seasons/spinoffs often split the episode
-    // numbers, so the top title match may not carry the episode we need.
-    for (url, score) in candidates.iter().take(4) {
+    // Walk identity-ranked candidates; a show's seasons/spinoffs often split the
+    // episode numbers, so the top title match may not carry the episode we need.
+    for (url, rank) in candidates.iter().take(4) {
         match resolve_episode(client, host, label, url, title, ep, mode).await {
             Ok(src) => return Ok(src),
             Err(e) => {
                 last_error = trunc(&e, 90);
-                // score 1000 = exact title match. Walking past it would hand
-                // back a spin-off/season as if it were the requested show.
-                if *score >= 1000 {
+                // rank 0 = exact title match. Walking past it would hand back a
+                // spin-off/season as if it were the requested show.
+                if *rank == 0 {
                     break;
                 }
             }

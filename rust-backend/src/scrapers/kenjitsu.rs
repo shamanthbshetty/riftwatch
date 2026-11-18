@@ -7,7 +7,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{env_list, env_str, normalize_base};
-use crate::title_score::{score_title, MIN_SCORE};
+use crate::title_score::rank_candidates;
 
 const AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const CACHE_TTL: Duration = Duration::from_millis(1_800_000);
@@ -84,24 +84,16 @@ fn js_string(v: &Value) -> String {
     }
 }
 
-// Reject any candidate that does not resemble the requested show — never fall
-// through to an arbitrary first hit.
+// Pick the provider result that is the requested show by identity — exact
+// title first, then the same base work. Never fall through to an arbitrary
+// first hit; a non-match returns None.
 fn pick_best(query: &str, results: &[Value]) -> Option<Value> {
-    let mut best: Option<&Value> = None;
-    let mut best_score = 0;
-    for r in results {
-        let s = score_title(query, r["name"].as_str().unwrap_or(""));
-        if s > best_score {
-            best_score = s;
-            best = Some(r);
-        }
-    }
-    // Same identity gate as the other providers.
-    if best_score >= MIN_SCORE {
-        best.cloned()
-    } else {
-        None
-    }
+    let titles: Vec<String> = results
+        .iter()
+        .map(|r| r["name"].as_str().unwrap_or("").to_string())
+        .collect();
+    let ordered = rank_candidates(query, &titles);
+    ordered.first().map(|&i| results[i].clone())
 }
 
 async fn fetch_json(client: &reqwest::Client, url: &str) -> Option<Value> {

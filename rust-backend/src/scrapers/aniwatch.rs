@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::env_list;
 use crate::safe_url::is_safe_url;
-use crate::title_score::{normalize, score_title, MIN_SCORE};
+use crate::title_score::{identity_rank, normalize};
 use scraper::{ElementRef, Html, Selector};
 
 use super::megaplay::extract_player_sources;
@@ -118,7 +118,7 @@ fn closest_film_name(node: ElementRef) -> Option<String> {
 struct Candidate {
     id: i64,
     title: String,
-    score: i32,
+    rank: i32,
 }
 
 async fn search_anime(
@@ -172,13 +172,13 @@ async fn search_anime(
             .unwrap_or_default();
         candidates.push(Candidate {
             id,
-            score: score_title(title, &name),
+            rank: identity_rank(title, &name),
             title: name,
         });
     }
 
-    candidates.retain(|c| c.score >= MIN_SCORE);
-    candidates.sort_by(|a, b| b.score.cmp(&a.score));
+    candidates.retain(|c| c.rank >= 0);
+    candidates.sort_by(|a, b| a.rank.cmp(&b.rank));
     Ok(candidates)
 }
 
@@ -468,7 +468,7 @@ pub async fn get_aniwatch_embed(
         // Walk the ranked candidates: search results mix seasons and spin-offs,
         // and the requested episode number often only exists on one of them.
         for candidate in candidates.iter().take(5) {
-            let is_exact = normalize(&candidate.title) == normalize(title);
+            let is_exact = candidate.rank == 0;
             // Per-candidate error so a failure on candidate 1 is not reported as
             // candidate 2's reason (stale lastError).
             let episode_id = match get_episode_id(client, &base, candidate.id, ep).await {
