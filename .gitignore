@@ -56,3 +56,5 @@ skills-lock.json
 
 # Temporary backend binary copy
 rust-backend/riftwatch-backend-run.exe
+
+rust-backend/riftwatch-backend-run.*
