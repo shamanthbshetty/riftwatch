@@ -53,3 +53,6 @@ skills-lock.json
 # misc folders
 .vs/
 .cache/
+
+# Temporary backend binary copy
+rust-backend/riftwatch-backend-run.exe
