@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::cmp::Ordering;
 
+use crate::anilist;
 use crate::movie_providers::get_movie_stream;
 use crate::tmdb;
 use crate::AppState;
@@ -171,6 +172,57 @@ pub async fn videos(State(state): State<AppState>, Query(q): Query<QDetails>) ->
     match tmdb::videos(&state.http, is_tv, &path_id).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => upstream_err(e),
+    }
+}
+
+/// TMDB trailer first; when TMDB has no embeddable YouTube video, look the
+/// title up on AniList (many anime films/series only carry a trailer there).
+pub async fn trailer(State(state): State<AppState>, Query(q): Query<QDetails>) -> impl IntoResponse {
+    let id = q.id.as_deref().map_or(0.0, js_number);
+    if id == 0.0 || id.is_nan() {
+        return bad_request("id required");
+    }
+    let is_tv = q.typ.as_deref() == Some("tv");
+    let path_id = js_int_str(id);
+
+    if let Ok(v) = tmdb::videos(&state.http, is_tv, &path_id).await {
+        if let Some(trailer) = tmdb::pick_youtube_trailer(&v) {
+            return (StatusCode::OK, Json(trailer)).into_response();
+        }
+    }
+
+    let mut titles: Vec<String> = Vec::new();
+    let mut year = None;
+    if let Ok(d) = tmdb::details(&state.http, is_tv, &path_id).await {
+        for key in ["title", "name", "original_title", "original_name"] {
+            if let Some(title) = d
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                if !titles.iter().any(|t| t.eq_ignore_ascii_case(title)) {
+                    titles.push(title.to_string());
+                }
+            }
+        }
+        for key in ["release_date", "first_air_date"] {
+            if let Some(y) = d
+                .get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.split('-').next())
+                .and_then(|y| y.parse::<i64>().ok())
+                .filter(|y| *y > 0)
+            {
+                year = Some(y);
+                break;
+            }
+        }
+    }
+
+    match anilist::trailer_by_title(&state.http, &titles, year, !is_tv).await {
+        Some(trailer) => (StatusCode::OK, Json(trailer)).into_response(),
+        None => (StatusCode::OK, Json(Value::Null)).into_response(),
     }
 }
 

@@ -69,6 +69,7 @@ async fn main() {
         .route("/api/movies/trending", get(routes::movies_api::trending))
         .route("/api/movies/tv-episodes", get(routes::movies_api::tv_episodes))
         .route("/api/movies/videos", get(routes::movies_api::videos))
+        .route("/api/movies/trailer", get(routes::movies_api::trailer))
         .route("/api/movies/stream", get(routes::movies_api::stream))
         // Anime discovery JSON API (was Next.js route handlers)
         .route("/api/health", get(routes::anime_api::health))

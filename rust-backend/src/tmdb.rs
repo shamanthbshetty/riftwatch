@@ -178,6 +178,167 @@ pub async fn videos(client: &reqwest::Client, is_tv: bool, id: &str) -> Result<V
     tmdb_fetch(client, &path, &[]).await
 }
 
+// ── Trailer lookup (cross-source fallback) ──
+//
+// TMDB's `/videos` payload mixes sites and types. The in-app modal can only
+// embed YouTube, so rank official English trailers first, then other trailers,
+// teasers, and finally any YouTube upload.
+
+fn video_rank(v: &Value) -> Option<i32> {
+    if v["site"].as_str() != Some("YouTube") {
+        return None;
+    }
+    v["key"].as_str().filter(|k| !k.is_empty())?;
+    let mut rank = match v["type"].as_str().unwrap_or("") {
+        "Trailer" => 100,
+        "Teaser" => 70,
+        "Clip" => 30,
+        _ => 50,
+    };
+    if v["official"].as_bool().unwrap_or(false) {
+        rank += 20;
+    }
+    if v["iso_639_1"].as_str() == Some("en") {
+        rank += 10;
+    }
+    Some(rank)
+}
+
+/// Best embeddable YouTube trailer from a TMDB `/videos` response, if any.
+pub fn pick_youtube_trailer(videos: &Value) -> Option<Value> {
+    let best = videos
+        .get("results")
+        .and_then(|r| r.as_array())?
+        .iter()
+        .filter_map(|v| Some((video_rank(v)?, v)))
+        .max_by_key(|(rank, _)| *rank)
+        .map(|(_, v)| v)?;
+    let key = best["key"].as_str()?;
+    Some(json!({ "id": key, "site": "youtube", "source": "tmdb" }))
+}
+
+fn year_of(v: &Value, keys: &[&str]) -> Option<i64> {
+    keys.iter().find_map(|k| {
+        v.get(*k)
+            .and_then(|d| d.as_str())
+            .and_then(|s| s.split('-').next())
+            .and_then(|y| y.parse::<i64>().ok())
+            .filter(|y| *y > 0)
+    })
+}
+
+fn candidate_names<'a>(v: &'a Value, keys: &[&str]) -> Vec<&'a str> {
+    keys.iter()
+        .filter_map(|k| v.get(*k).and_then(|s| s.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn score_tmdb_candidate(
+    query: &str,
+    names: &[&str],
+    cand_year: Option<i64>,
+    year: Option<i64>,
+    is_tv: bool,
+    prefer_tv: bool,
+) -> Option<i32> {
+    let base = names
+        .iter()
+        .map(|n| title_score::score_title(query, n))
+        .max()
+        .unwrap_or(0);
+    // 700+ means an exact normalized match (starts-with scores just under it),
+    // which is the confidence level needed to hand a page a trailer.
+    if base < 700 {
+        return None;
+    }
+    let mut score = base;
+    if let (Some(want), Some(got)) = (year, cand_year) {
+        let diff = (want - got).abs();
+        // A same-name remake must never stand in for the requested title.
+        if diff > 3 {
+            return None;
+        }
+        score += match diff {
+            0 => 150,
+            1 => 80,
+            _ => 0,
+        };
+    }
+    if is_tv == prefer_tv {
+        score += 40;
+    }
+    Some(score)
+}
+
+/// Search TMDB TV + movies for `titles` and return the best candidate's
+/// embeddable trailer. `year` disambiguates remakes; `prefer_tv` decides which
+/// medium to favour when AniList told us the format.
+pub async fn trailer_by_title(
+    client: &reqwest::Client,
+    titles: &[String],
+    year: Option<i64>,
+    prefer_tv: bool,
+) -> Option<Value> {
+    for title in titles {
+        let title = title.trim();
+        if title.is_empty() {
+            continue;
+        }
+        let params = [
+            ("query", title.to_string()),
+            ("include_adult", "false".to_string()),
+        ];
+        let (tv, movie) = tokio::join!(
+            tmdb_fetch(client, "/search/tv", &params),
+            tmdb_fetch(client, "/search/movie", &params),
+        );
+
+        let mut candidates: Vec<(i32, bool, String)> = Vec::new();
+        if let Ok(data) = tv {
+            for r in results(&data) {
+                let id = r["id"].as_i64().unwrap_or(0);
+                if id <= 0 {
+                    continue;
+                }
+                let names = candidate_names(&r, &["name", "original_name"]);
+                let cand_year = year_of(&r, &["first_air_date"]);
+                if let Some(score) =
+                    score_tmdb_candidate(title, &names, cand_year, year, true, prefer_tv)
+                {
+                    candidates.push((score, true, id.to_string()));
+                }
+            }
+        }
+        if let Ok(data) = movie {
+            for r in results(&data) {
+                let id = r["id"].as_i64().unwrap_or(0);
+                if id <= 0 {
+                    continue;
+                }
+                let names = candidate_names(&r, &["title", "original_title"]);
+                let cand_year = year_of(&r, &["release_date"]);
+                if let Some(score) =
+                    score_tmdb_candidate(title, &names, cand_year, year, false, prefer_tv)
+                {
+                    candidates.push((score, false, id.to_string()));
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, is_tv, id) in candidates.into_iter().take(3) {
+            if let Ok(v) = videos(client, is_tv, &id).await {
+                if let Some(trailer) = pick_youtube_trailer(&v) {
+                    return Some(trailer);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// TMDB "More like this" — media_type tagged so links hit the right detail URL.
 pub async fn recommendations(
     client: &reqwest::Client,

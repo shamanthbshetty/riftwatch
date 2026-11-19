@@ -9,7 +9,13 @@ pub fn normalize(s: &str) -> String {
     let no_punct: String = s
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c
+            } else {
+                fold_latin(c).unwrap_or(' ')
+            }
+        })
         .collect();
     let mut out = Vec::new();
     for w in no_punct.split_whitespace() {
@@ -22,6 +28,31 @@ pub fn normalize(s: &str) -> String {
         out.push(w);
     }
     out.join(" ")
+}
+
+// TMDB (and providers) spell romanized titles with macrons/diacritics
+// ("Naruto Shippūden", "Pokémon") while query strings usually use plain
+// letters. Folding those to their ASCII base keeps an exact title com-
+// parison working instead of turning the accented letter into a word break.
+fn fold_latin(c: char) -> Option<char> {
+    Some(match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => 'a',
+        'ç' | 'ć' | 'č' => 'c',
+        'ď' | 'ð' => 'd',
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ė' | 'ę' | 'ě' => 'e',
+        'ğ' => 'g',
+        'ì' | 'í' | 'î' | 'ï' | 'ī' | 'į' | 'ı' => 'i',
+        'ł' => 'l',
+        'ñ' | 'ń' | 'ň' => 'n',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ő' => 'o',
+        'ř' => 'r',
+        'ś' | 'š' | 'ş' => 's',
+        'ť' => 't',
+        'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' | 'ű' | 'ų' => 'u',
+        'ý' | 'ÿ' => 'y',
+        'ź' | 'ż' | 'ž' => 'z',
+        _ => return None,
+    })
 }
 
 // Titles sent to provider search must use plain punctuation: upstream sites
@@ -238,4 +269,16 @@ pub fn rank_candidates(target: &str, titles: &[String]) -> Vec<usize> {
         .collect();
     scored.sort_by_key(|&(r, i)| (r, i));
     scored.into_iter().map(|(_, i)| i).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize;
+
+    #[test]
+    fn normalizes_latin_diacritics() {
+        assert_eq!(normalize("Naruto Shippūden"), "naruto shippuden");
+        assert_eq!(normalize("Pokémon"), "pokemon");
+        assert_eq!(normalize("L'attaque des Titans"), "l attaque des titans");
+    }
 }

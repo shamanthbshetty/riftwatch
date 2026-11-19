@@ -290,31 +290,196 @@ async fn fetch_relations(client: &reqwest::Client, vars: Value) -> Result<Vec<Va
     Ok(out)
 }
 
-// ── Trailer (AniList Media.trailer) ──
+// ── Trailer (AniList Media.trailer, with TMDB cross-source fallback) ──
+
+const TRAILER_BY_ID_QUERY: &str = r#"query($id: Int) {
+  Media(id: $id, type: ANIME) {
+    trailer { id site }
+    title { romaji english }
+    startDate { year }
+    format
+  }
+}"#;
+
+const TRAILER_BY_MAL_QUERY: &str = r#"query($idMal: Int) {
+  Media(idMal: $idMal, type: ANIME) {
+    trailer { id site }
+    title { romaji english }
+    startDate { year }
+    format
+  }
+}"#;
+
+const TRAILER_SEARCH_QUERY: &str = r#"query($search: String) {
+  Page(perPage: 10) {
+    media(search: $search, type: ANIME, isAdult: false) {
+      title { romaji english }
+      startDate { year }
+      format
+      popularity
+      trailer { id site }
+    }
+  }
+}"#;
+
+fn push_unique_title(out: &mut Vec<String>, title: Option<&str>) {
+    let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => t,
+        None => return,
+    };
+    if !out.iter().any(|t| t.eq_ignore_ascii_case(title)) {
+        out.push(title.to_string());
+    }
+}
+
+fn youtube_trailer(trailer: &Value) -> Option<Value> {
+    if !trailer["site"]
+        .as_str()
+        .is_some_and(|s| s.eq_ignore_ascii_case("youtube"))
+    {
+        return None;
+    }
+    let id = trailer["id"].as_str().filter(|s| !s.is_empty())?;
+    Some(json!({ "id": id, "site": "youtube", "source": "anilist" }))
+}
+
+/// AniList trailer first; when the community entry has none, search TMDB by
+/// the title/year we just fetched. AniList's trailer field is sparsely filled,
+/// so most older shows rely on this TMDB pass.
 pub async fn get_ani_trailer(
     client: &reqwest::Client,
     id: Option<u64>,
     mal_id: Option<u64>,
+    title: Option<&str>,
 ) -> Result<Value, String> {
-    let (query, vars) = if let Some(v) = id.filter(|v| *v > 0) {
-        (
-            r#"query($id: Int) { Media(id: $id, type: ANIME) { trailer { id site } } }"#.to_string(),
-            json!({ "id": v }),
-        )
-    } else if let Some(v) = mal_id.filter(|v| *v > 0) {
-        (
-            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { trailer { id site } } }"#.to_string(),
-            json!({ "idMal": v }),
-        )
+    let mut titles: Vec<String> = Vec::new();
+    let mut year = None;
+    let mut prefer_tv = true;
+    let mut lookup_err = None;
+
+    let lookup = if let Some(v) = id.filter(|v| *v > 0) {
+        Some((TRAILER_BY_ID_QUERY, json!({ "id": v })))
     } else {
-        return Ok(Value::Null);
+        mal_id
+            .filter(|v| *v > 0)
+            .map(|v| (TRAILER_BY_MAL_QUERY, json!({ "idMal": v })))
     };
-    let j = anilist_post(client, &query, &vars, Duration::from_secs(8)).await?;
-    let trailer = &j["data"]["Media"]["trailer"];
-    if trailer.is_null() {
-        return Ok(Value::Null);
+
+    if let Some((query, vars)) = lookup {
+        match anilist_post(client, query, &vars, Duration::from_secs(8)).await {
+            Ok(j) => {
+                let media = &j["data"]["Media"];
+                if !media.is_null() {
+                    if let Some(trailer) = youtube_trailer(&media["trailer"]) {
+                        return Ok(trailer);
+                    }
+                    push_unique_title(&mut titles, media["title"]["english"].as_str());
+                    push_unique_title(&mut titles, media["title"]["romaji"].as_str());
+                    year = media["startDate"]["year"].as_i64().filter(|y| *y > 0);
+                    // Anything that isn't a movie is a series for TMDB's
+                    // TV/movie split (TV, OVA, ONA, specials).
+                    prefer_tv = media["format"].as_str() != Some("MOVIE");
+                }
+            }
+            Err(e) => lookup_err = Some(e),
+        }
     }
-    Ok(trailer.clone())
+
+    // Titles supplied by the caller (e.g. Kitsu-only entries) are a last
+    // resort when AniList has no record to read a title from.
+    push_unique_title(&mut titles, title);
+
+    if let Some(trailer) = tmdb::trailer_by_title(client, &titles, year, prefer_tv).await {
+        return Ok(trailer);
+    }
+
+    match lookup_err {
+        Some(e) => Err(e),
+        None => Ok(Value::Null),
+    }
+}
+
+fn score_ani_candidate(
+    query: &str,
+    media: &Value,
+    year: Option<i64>,
+    prefer_movie: bool,
+) -> Option<i32> {
+    let names = [
+        media["title"]["english"].as_str(),
+        media["title"]["romaji"].as_str(),
+    ];
+    let base = names
+        .iter()
+        .flatten()
+        .map(|n| title_score::score_title(query, n))
+        .max()
+        .unwrap_or(0);
+    if base < 700 {
+        return None;
+    }
+    let mut score = base;
+    if let (Some(want), Some(got)) = (year, media["startDate"]["year"].as_i64()) {
+        let diff = (want - got).abs();
+        if diff > 3 {
+            return None;
+        }
+        score += match diff {
+            0 => 150,
+            1 => 80,
+            _ => 0,
+        };
+    }
+    let is_movie = media["format"].as_str() == Some("MOVIE");
+    if is_movie == prefer_movie {
+        score += 40;
+    }
+    score += (media["popularity"].as_i64().unwrap_or(0) / 10_000).min(50) as i32;
+    Some(score)
+}
+
+/// Reverse fallback for the movies side: find an AniList entry by title (the
+/// TMDB title/year is all we have) and return its trailer if it has one.
+pub async fn trailer_by_title(
+    client: &reqwest::Client,
+    titles: &[String],
+    year: Option<i64>,
+    prefer_movie: bool,
+) -> Option<Value> {
+    for title in titles {
+        let title = title.trim();
+        if title.is_empty() {
+            continue;
+        }
+        let j = match anilist_post(
+            client,
+            TRAILER_SEARCH_QUERY,
+            &json!({ "search": title }),
+            Duration::from_secs(8),
+        )
+        .await
+        {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+        let media = j["data"]["Page"]["media"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut scored: Vec<(i32, Value)> = media
+            .iter()
+            .filter_map(|m| {
+                score_ani_candidate(title, m, year, prefer_movie).map(|s| (s, m.clone()))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, m) in scored {
+            if let Some(trailer) = youtube_trailer(&m["trailer"]) {
+                return Some(trailer);
+            }
+        }
+    }
+    None
 }
 
 // ── Recommendations (AniList Media.recommendations) ──

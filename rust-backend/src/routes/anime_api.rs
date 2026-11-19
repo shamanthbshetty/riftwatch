@@ -223,10 +223,19 @@ pub async fn relations(State(state): State<AppState>, Query(q): Query<RelQ>) -> 
 }
 
 // ── /api/anime/trailer ──
-pub async fn trailer(State(state): State<AppState>, Query(q): Query<RelQ>) -> impl IntoResponse {
+#[derive(Deserialize)]
+pub struct TrailerQ {
+    pub id: Option<String>,
+    #[serde(rename = "malId")]
+    pub mal_id: Option<String>,
+    pub title: Option<String>,
+}
+
+pub async fn trailer(State(state): State<AppState>, Query(q): Query<TrailerQ>) -> impl IntoResponse {
     let id = parse_id(&q.id);
     let mal_id = parse_id(&q.mal_id);
-    match anilist::get_ani_trailer(&state.http, id, mal_id).await {
+    let title = q.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    match anilist::get_ani_trailer(&state.http, id, mal_id, title).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => (
             StatusCode::BAD_GATEWAY,

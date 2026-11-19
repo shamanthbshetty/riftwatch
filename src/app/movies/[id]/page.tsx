@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -89,28 +90,32 @@ export default function MovieDetailPage() {
   }, [id, type, key]);
   const recs = recsState?.key === key ? recsState.list : EMPTY_RECS;
 
-  // Trailer (TMDB videos)
-  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  // Trailer (TMDB first, AniList fallback handled by the API)
+  const [trailerState, setTrailerState] = useState<{
+    key: string;
+    trailer: string | null;
+    done: boolean;
+  } | null>(null);
   const [trailerOpen, setTrailerOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/movies/videos?id=${encodeURIComponent(id)}&type=${type}`)
+    fetch(`/api/movies/trailer?id=${encodeURIComponent(id)}&type=${type}`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        const vids = Array.isArray(data?.results) ? data.results : [];
-        const pick =
-          vids.find((v: { site?: string; type?: string }) => v.site === "YouTube" && v.type === "Trailer") ||
-          vids.find((v: { site?: string }) => v.site === "YouTube");
-        setTrailerKey(pick?.key ?? null);
+        const pick = data?.site === "youtube" && data?.id ? data.id : null;
+        setTrailerState({ key, trailer: pick, done: true });
       })
       .catch(() => {
-        if (!cancelled) setTrailerKey(null);
+        if (!cancelled) setTrailerState({ key, trailer: null, done: true });
       });
     return () => {
       cancelled = true;
     };
-  }, [id, type]);
+  }, [id, type, key]);
+  const trailerReady = trailerState?.key === key ? trailerState : null;
+  const trailerKey = trailerReady?.trailer ?? null;
+  const trailerDone = trailerReady?.done ?? false;
 
   if (loading) {
     return (
@@ -242,15 +247,7 @@ export default function MovieDetailPage() {
               )}
               <button
                 type="button"
-                onClick={() => {
-                  if (trailerKey) setTrailerOpen(true);
-                  else
-                    window.open(
-                      `https://www.youtube.com/results?search_query=${encodeURIComponent(title + " trailer")}`,
-                      "_blank",
-                      "noopener,noreferrer",
-                    );
-                }}
+                onClick={() => setTrailerOpen(true)}
                 className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground font-semibold px-4 py-2 rounded-lg text-sm transition-colors border border-border"
               >
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -308,46 +305,56 @@ export default function MovieDetailPage() {
         </section>
       )}
 
-      {/* Trailer modal */}
-      {trailerOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setTrailerOpen(false)}
-        >
-          <div className="relative w-full max-w-[min(100%,142vh)] aspect-video mx-auto" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              onClick={() => setTrailerOpen(false)}
-              className="absolute top-2 right-2 z-10 flex items-center justify-center w-8 h-8 rounded-full bg-black/60 text-white/90 hover:text-white hover:bg-black/80 transition-colors"
-              aria-label="Close trailer"
+      {/* Trailer modal — portaled so the page's entrance transform cannot
+          trap position:fixed inside the long page (it would center offscreen). */}
+      {trailerOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+            onClick={() => setTrailerOpen(false)}
+          >
+            <div
+              className="relative w-full max-w-[min(100%,142vh)] aspect-video mx-auto"
+              onClick={(e) => e.stopPropagation()}
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-            {trailerKey ? (
-              <iframe
-                src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
-                title="Trailer"
-                className="w-full h-full rounded-lg"
-                allow="autoplay; encrypted-media; picture-in-picture"
-                allowFullScreen
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-white/80 p-6 text-center">
-                <p className="text-sm">No official trailer on TMDB.</p>
-                <a
-                  href={`https://www.youtube.com/results?search_query=${encodeURIComponent(title + " trailer")}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-border"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  Search YouTube
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+              <button
+                type="button"
+                onClick={() => setTrailerOpen(false)}
+                className="absolute top-2 right-2 z-10 flex items-center justify-center w-8 h-8 rounded-full bg-black/60 text-white/90 hover:text-white hover:bg-black/80 transition-colors"
+                aria-label="Close trailer"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+              {trailerKey ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`}
+                  title="Trailer"
+                  className="w-full h-full rounded-lg"
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : !trailerDone ? (
+                <div className="w-full h-full flex items-center justify-center text-white/80 p-6 text-center">
+                  <p className="text-sm">Finding the trailer…</p>
+                </div>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-white/80 p-6 text-center">
+                  <p className="text-sm">No official trailer on TMDB or AniList.</p>
+                  <a
+                    href={`https://www.youtube.com/results?search_query=${encodeURIComponent(title + " trailer")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 bg-surface-hover hover:bg-border text-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-border"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    Search YouTube
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
