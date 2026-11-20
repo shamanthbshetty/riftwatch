@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use chrono::{Datelike, FixedOffset, SecondsFormat, Timelike, Utc};
+use chrono::{Datelike, FixedOffset, SecondsFormat, Timelike, TimeZone, Utc};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
@@ -190,6 +190,40 @@ pub async fn jikan_anime(State(state): State<AppState>, Query(q): Query<MalQ>) -
     match anilist::get_anime_schedule(&state.http, &mal_id).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err_502(&e),
+    }
+}
+
+// ── /api/anime/ep-date ──
+#[derive(Deserialize)]
+pub struct EpDateQ {
+    #[serde(rename = "malId")]
+    pub mal_id: Option<String>,
+    pub ep: Option<String>,
+}
+
+/// `{ "airDate": "2026-11-14" }` — the UTC calendar date an episode airs, or
+/// `{}` when AniList has no schedule for it. Called only when a notification
+/// is created; never on the poll itself, so it cannot burn the rate limit.
+pub async fn ep_date(State(state): State<AppState>, Query(q): Query<EpDateQ>) -> impl IntoResponse {
+    let mal_id = q.mal_id.unwrap_or_default();
+    let ep: i64 = q.ep.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+    if mal_id.trim().is_empty() || ep <= 0 {
+        return Json(json!({})).into_response();
+    }
+    match anilist::episode_airing_at(&state.http, mal_id.trim(), ep).await {
+        Ok(Some(ts)) => {
+            let date = Utc
+                .timestamp_opt(ts, 0)
+                .single()
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            if date.is_empty() {
+                Json(json!({})).into_response()
+            } else {
+                Json(json!({ "airDate": date })).into_response()
+            }
+        }
+        Ok(None) | Err(_) => Json(json!({})).into_response(),
     }
 }
 

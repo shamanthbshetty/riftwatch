@@ -219,28 +219,57 @@ fn strip_season(norm: &str) -> String {
         .join(" ")
 }
 
+/// The work a title names once format words ("movie", "ova"…), articles and
+/// season markers are dropped, so provider naming variants of one work still
+/// compare equal: "… Quintuplets Movie" and "… Quintuplets: The Movie" are the
+/// same film even though neither is a prefix of the other.
+fn base_work(norm: &str) -> String {
+    let without_format: Vec<&str> = norm
+        .split_whitespace()
+        .filter(|w| !FORMAT.contains(w) && !matches!(*w, "the" | "a" | "an"))
+        .collect();
+    strip_season(&without_format.join(" "))
+}
+
 /// How a provider candidate relates to the target title. Lower is better;
 /// -1 means "not the requested work" (drop it).
-/// 0 exact · 1 same base + season · 2 same base, other season · 3 prefix
+/// 0 exact · 1 same base · 2 same base, candidate adds a format ·
+/// 3 same base, conflicting season · 4 prefix · 5 prefix adding a format
 pub fn identity_rank(target: &str, candidate: &str) -> i32 {
     let t = normalize(target);
     let c = normalize(candidate);
     if t.is_empty() || c.is_empty() {
         return -1;
     }
+
+    // A format word names WHICH work of a franchise a title is, so a TV entry
+    // must never stand in for its movie. Without this the request
+    // "… Quintuplets Movie" prefix-matched the series — its title is a prefix
+    // of the movie's — with rank 3, and the movie played TV episode 1. Only a
+    // format the QUERY asks for that the candidate lacks (or a different one)
+    // rejects: a candidate that merely ADDS one ("Mugen Train" → "… the Movie")
+    // stays eligible, just ranked below a format-neutral match.
+    let (q_fmt, c_fmt) = (format_token(&t), format_token(&c));
+    match (q_fmt, c_fmt) {
+        (Some(a), Some(b)) if a != b => return -1,
+        (Some(_), None) => return -1,
+        _ => {}
+    }
+    let adds_format = q_fmt.is_none() && c_fmt.is_some();
+
     if t == c {
         return 0;
     }
-    let tb = strip_season(&t);
-    let cb = strip_season(&c);
+    let tb = base_work(&t);
+    let cb = base_work(&c);
     if !tb.is_empty() && tb == cb {
         let ts = season_of(&t);
         let cs = season_of(&c);
         // Same base but a conflicting explicit season is a different work.
         if ts.is_some() && cs.is_some() && ts != cs {
-            return 2;
+            return 3;
         }
-        return 1;
+        return if adds_format { 2 } else { 1 };
     }
     let (short, long) = if tb.len() <= cb.len() {
         (&tb, &cb)
@@ -250,7 +279,7 @@ pub fn identity_rank(target: &str, candidate: &str) -> i32 {
     if !short.is_empty() && long.starts_with(short) {
         let rest = &long[short.len()..];
         if rest.is_empty() || rest.starts_with(' ') {
-            return 3;
+            return if adds_format { 5 } else { 4 };
         }
     }
     -1
@@ -273,12 +302,59 @@ pub fn rank_candidates(target: &str, titles: &[String]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize;
+    use super::{identity_rank, normalize};
 
     #[test]
     fn normalizes_latin_diacritics() {
         assert_eq!(normalize("Naruto Shippūden"), "naruto shippuden");
         assert_eq!(normalize("Pokémon"), "pokemon");
         assert_eq!(normalize("L'attaque des Titans"), "l attaque des titans");
+    }
+
+    // The series title is a prefix of the movie title, so the prefix branch
+    // used to accept it (rank 3) and the Quintuplets movie played TV S1E1.
+    #[test]
+    fn rejects_tv_entry_when_the_query_asks_for_the_movie() {
+        assert_eq!(
+            identity_rank(
+                "The Quintessential Quintuplets Movie",
+                "The Quintessential Quintuplets"
+            ),
+            -1
+        );
+        assert_eq!(
+            identity_rank(
+                "The Quintessential Quintuplets Movie",
+                "The Quintessential Quintuplets 2"
+            ),
+            -1
+        );
+    }
+
+    // The provider lists the film as "…: The Movie" — neither a prefix nor an
+    // exact match of our "… Movie", so it used to be dropped too.
+    #[test]
+    fn matches_a_movies_provider_naming_variant() {
+        let rank = identity_rank(
+            "The Quintessential Quintuplets Movie",
+            "The Quintessential Quintuplets: The Movie",
+        );
+        assert!(rank >= 0, "movie candidate dropped, rank {rank}");
+    }
+
+    #[test]
+    fn keeps_series_and_season_matching_intact() {
+        assert_eq!(
+            identity_rank("The Quintessential Quintuplets", "The Quintessential Quintuplets"),
+            0
+        );
+        assert_eq!(identity_rank("Naruto Shippuden", "Naruto Shippuden"), 0);
+        assert_eq!(
+            identity_rank("Naruto Season 2", "Naruto Season 3"),
+            3,
+            "a conflicting season must rank below a same-base match"
+        );
+        // A candidate that ADDS a format word is still the same work.
+        assert!(identity_rank("Mugen Train", "Mugen Train the Movie") >= 0);
     }
 }

@@ -11,6 +11,16 @@ const POLL_INTERVAL = 5 * 60 * 1000;
 let sweeping = false;
 let lastSweepAt = 0;
 
+/** Highest episode number in an AllAnime id list ("1".."12"); falls back to
+ *  the count when a provider returns opaque ids instead of numbers. */
+function latestEpisode(list: string[]): number {
+  let max = 0;
+  for (const v of list) {
+    if (/^\d+$/.test(v)) max = Math.max(max, Number(v));
+  }
+  return max || list.length;
+}
+
 export default function EpisodeNotifier() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Polling pauses on watch pages so we don't race the page's own episode
@@ -69,23 +79,44 @@ export default function EpisodeNotifier() {
             const newSub = subCount > prevSub ? subCount - prevSub : 0;
             const newDub = dubCount > prevDub ? dubCount - prevDub : 0;
 
+            // Link to the latest available episode, not the first "new" one —
+            // otherwise a show that went from 0 → N available reads as ep 1.
+            const latestSub = latestEpisode(subEps);
+            const latestDub = latestEpisode(dubEps);
+
             if (prev !== undefined && (newSub > 0 || newDub > 0)) {
-              const firstNewSubEp = prevSub > 0 ? prevSub + 1 : 1;
-              const firstNewDubEp = prevDub > 0 ? prevDub + 1 : 1;
+              const subEp = newSub > 0 ? latestSub : 0;
+              const dubEp = newDub > 0 ? latestDub : 0;
+              const notifyEp = subEp || dubEp;
               const parts: string[] = [];
               if (newSub > 0) parts.push(`${newSub} sub`);
               if (newDub > 0) parts.push(`${newDub} dub`);
+
+              // Release date: only fetch when a notification is actually created,
+              // so the per-poll path never spends AniList calls.
+              let releasedAt: string | undefined;
+              if (data.malId && notifyEp > 0) {
+                try {
+                  const r = await fetch(`/api/anime/ep-date?malId=${encodeURIComponent(data.malId)}&ep=${notifyEp}`);
+                  if (r.ok) {
+                    const d = await r.json();
+                    if (typeof d?.airDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.airDate)) releasedAt = d.airDate;
+                  }
+                } catch { /* skip */ }
+              }
 
               addNotification({
                 id: `${item.id}-${subCount + dubCount}`,
                 title,
                 body: `New: ${parts.join(", ")}`,
                 thumbnail: item.thumbnail,
-                href: `/watch/${item.id}?ep=${firstNewSubEp}&mode=sub`,
-                hrefSub: newSub > 0 ? `/watch/${item.id}?ep=${firstNewSubEp}&mode=sub` : undefined,
-                hrefDub: newDub > 0 ? `/watch/${item.id}?ep=${firstNewDubEp}&mode=dub` : undefined,
+                href: `/watch/${item.id}?ep=${notifyEp}&mode=${newSub > 0 ? "sub" : "dub"}`,
+                hrefSub: newSub > 0 ? `/watch/${item.id}?ep=${latestSub}&mode=sub` : undefined,
+                hrefDub: newDub > 0 ? `/watch/${item.id}?ep=${latestDub}&mode=dub` : undefined,
                 subCount: newSub,
                 dubCount: newDub,
+                releasedAt,
+                episodeLabel: notifyEp > 0 ? `Ep ${notifyEp}` : undefined,
               });
             }
             setEpCache(item.id, { sub: subCount, dub: dubCount });

@@ -576,6 +576,49 @@ pub async fn get_anime_schedule(client: &reqwest::Client, mal_id: &str) -> Resul
     Ok(out)
 }
 
+// ── Episode air date (feeds the "released" line on episode notifications) ──
+// Only the *schedule* nodes are needed, and only when a notification is actually
+// created, so this stays out of the per-poll /api/episodes path.
+
+const EP_AIR_QUERY: &str =
+    "query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { airingSchedule(notYetAired: false, perPage: 50) { nodes { episode airingAt } } } }";
+
+/// Unix seconds at which `episode` is scheduled to air, or None when AniList
+/// has no schedule entry for it (un-scheduled shows, or long runners past the
+/// first 50 nodes). The whole schedule is memoized per show for an hour so a
+/// notification sweep costs at most one AniList call per title.
+pub async fn episode_airing_at(
+    client: &reqwest::Client,
+    mal_id: &str,
+    episode: i64,
+) -> Result<Option<i64>, String> {
+    let id: i64 = match mal_id.parse() {
+        Ok(v) if v > 0 => v,
+        _ => return Ok(None),
+    };
+    let memo_key = format!("airing:{id}");
+    let nodes = match memo_get(&memo_key, HOUR) {
+        Some(v) => v,
+        None => {
+            let j = anilist_post(client, EP_AIR_QUERY, &json!({ "idMal": id }), Duration::from_secs(8))
+                .await?;
+            let nodes = j["data"]["Media"]["airingSchedule"]["nodes"].clone();
+            if !nodes.is_array() {
+                return Ok(None);
+            }
+            memo_set(&memo_key, nodes.clone());
+            nodes
+        }
+    };
+    Ok(nodes
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|n| n["episode"].as_i64() == Some(episode))
+        .and_then(|n| n["airingAt"].as_i64())
+        .filter(|at| *at > 0))
+}
+
 // ── Episode titles (replaces jikan getEpisodeTitles via Kitsu) ──
 
 async fn mal_to_kitsu_id(client: &reqwest::Client, mal_id: &str) -> Option<String> {

@@ -74,6 +74,7 @@ async fn main() {
         // Anime discovery JSON API (was Next.js route handlers)
         .route("/api/health", get(routes::anime_api::health))
         .route("/api/jikan-anime", get(routes::anime_api::jikan_anime))
+        .route("/api/anime/ep-date", get(routes::anime_api::ep_date))
         .route("/api/relations", get(routes::anime_api::relations))
         .route("/api/anime/trailer", get(routes::anime_api::trailer))
         .route("/api/anime/recommendations", get(routes::anime_api::recommendations))

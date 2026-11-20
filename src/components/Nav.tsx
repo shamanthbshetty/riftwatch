@@ -15,6 +15,24 @@ import { useNotifications, useTheme } from "@/lib/useWatchlists";
 import type { SearchResult } from "@/lib/allanime";
 import type { MovieResult } from "@/lib/movies";
 
+function formatReleaseDate(iso: string): string {
+  const parts = iso.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return iso;
+  const [y, m, d] = parts;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function releaseLine(n: AppNotification): string {
+  const bits: string[] = [];
+  if (n.episodeLabel) bits.push(n.episodeLabel);
+  if (n.releasedAt) bits.push(`Released ${formatReleaseDate(n.releasedAt)}`);
+  return bits.join(" · ");
+}
+
 export default function Nav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -369,6 +387,9 @@ export default function Nav() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-semibold text-foreground truncate">{n.title}</p>
+                                {releaseLine(n) && (
+                                  <p className="text-[10px] text-text-muted mt-0.5 truncate">{releaseLine(n)}</p>
+                                )}
                                 <p className="text-[11px] text-text-muted mt-0.5">{n.body}</p>
                               </div>
                               {!n.read && <span className="w-2 h-2 rounded-full bg-accent shrink-0 mt-1" />}

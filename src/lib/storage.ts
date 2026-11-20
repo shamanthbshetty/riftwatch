@@ -54,6 +54,8 @@ export interface AppNotification {
   hrefDub?: string;
   subCount?: number;
   dubCount?: number;
+  releasedAt?: string;
+  episodeLabel?: string;
   read: boolean;
   timestamp: number;
 }
