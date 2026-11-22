@@ -120,6 +120,11 @@ export default function VideoPlayer({
   const lastSaveRef = useRef(0);
   const restoredRef = useRef(false);
   useEffect(() => { restoredRef.current = false; }, [src]);
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stallStartRef = useRef({ pos: 0, attempts: 0 });
+  const clearStallTimer = useCallback(() => {
+    if (stallTimerRef.current) { clearTimeout(stallTimerRef.current); stallTimerRef.current = null; }
+  }, []);
   const barRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
   const onNextRef = useRef(onNext);
@@ -530,8 +535,55 @@ export default function VideoPlayer({
       }
       restoredRef.current = true;
     };
-    const onWaiting = () => setBuffering(true);
-    const onReady = () => setBuffering(false);
+    const onWaiting = () => {
+      setBuffering(true);
+      // If the playhead doesn't advance within ~6s of entering the buffering
+      // state, the browser has silently stalled (common on proxied mp4s that
+      // throttle mid-file). Recover instead of spinning forever: nudge the
+      // playhead forward to force a re-buffer, and if that fails escalate to
+      // source failover so the watch page can hop to another server.
+      clearStallTimer();
+      const v0 = videoRef.current;
+      if (!v0) return;
+      stallStartRef.current = { pos: v0.currentTime, attempts: 0 };
+      stallTimerRef.current = setTimeout(() => {
+        const el = videoRef.current;
+        if (!el) return;
+        if (Math.abs(el.currentTime - stallStartRef.current.pos) < 0.25) {
+          stallStartRef.current.attempts++;
+          if (stallStartRef.current.attempts <= 2) {
+            try {
+              el.currentTime = Math.min(
+                el.currentTime + 0.5,
+                (el.duration || Infinity) - 0.05,
+              );
+            } catch { /* ignore */ }
+            void el.play().catch(() => {});
+            stallTimerRef.current = setTimeout(() => {
+              const el2 = videoRef.current;
+              if (!el2) return;
+              if (Math.abs(el2.currentTime - stallStartRef.current.pos) < 0.25) {
+                setShowError(true);
+                setBuffering(false);
+                onErrorRef.current?.();
+              } else {
+                setBuffering(false);
+                clearStallTimer();
+              }
+            }, 5000);
+          } else {
+            setShowError(true);
+            setBuffering(false);
+            onErrorRef.current?.();
+          }
+        } else {
+          setBuffering(false);
+          clearStallTimer();
+        }
+      }, 6000);
+    };
+    const onStalled = () => onWaiting();
+    const onReady = () => { setBuffering(false); clearStallTimer(); };
     const onRate = () => setSpeed(v.playbackRate);
     const onVol = () => { setVolume(v.volume); setMuted(v.muted); };
     const onPipEnter = () => setMenuOpen(false);
@@ -545,6 +597,7 @@ export default function VideoPlayer({
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("waiting", onWaiting);
+    v.addEventListener("stalled", onStalled);
     v.addEventListener("playing", onReady);
     v.addEventListener("canplay", onReady);
     v.addEventListener("seeked", onReady);
@@ -561,6 +614,7 @@ export default function VideoPlayer({
 
     return () => {
       cancelAnimationFrame(raf);
+      clearStallTimer();
       v.removeEventListener("timeupdate", pushTime);
       v.removeEventListener("seeked", pushTime);
       v.removeEventListener("loadedmetadata", onLoadedMetaRestore);
@@ -570,6 +624,7 @@ export default function VideoPlayer({
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
       v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("stalled", onStalled);
       v.removeEventListener("playing", onReady);
       v.removeEventListener("canplay", onReady);
       v.removeEventListener("seeked", onReady);
@@ -577,9 +632,7 @@ export default function VideoPlayer({
       v.removeEventListener("volumechange", onVol);
       v.removeEventListener("enterpictureinpicture", onPipEnter);
     };
-  }, []);
-
-  /* ------- fullscreen ------- */
+  }, [clearStallTimer]);
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
     document.addEventListener("fullscreenchange", onFsChange);
