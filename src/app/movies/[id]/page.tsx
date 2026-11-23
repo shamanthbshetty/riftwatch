@@ -314,7 +314,7 @@ export default function MovieDetailPage() {
             onClick={() => setTrailerOpen(false)}
           >
             <div
-              className="relative w-full max-w-full aspect-video mx-auto"
+              className="relative my-auto w-full max-w-[calc(100vw-2rem)] aspect-video mx-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <button
