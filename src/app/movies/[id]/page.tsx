@@ -310,11 +310,11 @@ export default function MovieDetailPage() {
       {trailerOpen &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-4"
             onClick={() => setTrailerOpen(false)}
           >
             <div
-              className="relative w-full max-w-[min(100%,142vh)] aspect-video mx-auto"
+              className="relative w-full max-w-full aspect-video mx-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <button
