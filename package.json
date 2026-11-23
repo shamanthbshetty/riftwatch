@@ -10,6 +10,7 @@
     "stop": "node scripts/stop.mjs",
     "build": "next build",
     "build:rust": "cargo build --release",
+    "clean:rust": "node scripts/clean-rust.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

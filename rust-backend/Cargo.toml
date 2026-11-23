@@ -27,6 +27,15 @@ base64 = "0.22"
 chrono = "0.4"
 percent-encoding = "2"
 
+# Debug builds only need line tables for backtraces; full DWARF made every
+# binary ~163 MB and incremental state cost another ~0.85 GB per rebuild.
+# `incremental = false` trades a little rebuild time for a target dir that
+# does not grow with every edit. Run `npm run clean:rust` to prune stale
+# hashed binaries (cargo keeps one per past build).
+[profile.dev]
+debug = 1
+incremental = false
+
 [profile.release]
 opt-level = 3
 lto = true
