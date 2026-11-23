@@ -4,13 +4,13 @@ import { useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Play, X } from "lucide-react";
-import { formatMediaTime, removeFromHistory, type HistoryItem } from "@/lib/storage";
+import { formatMediaTime, removeShowFromHistory, type HistoryItem } from "@/lib/storage";
 import { useContinueWatching, useShowResume } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 import Rail from "./Rail";
 import SectionHeader from "./SectionHeader";
 
-function ContinueCard({ item, onRemove }: { item: HistoryItem; onRemove: (id: string, ep: number) => void }) {
+function ContinueCard({ item, onRemove }: { item: HistoryItem; onRemove: (id: string) => void }) {
   const resume = useShowResume(item.id);
   const targetEp = resume && resume.ep >= 1 ? resume.ep : item.ep;
   const targetMode = resume && (resume.mode === "sub" || resume.mode === "dub") ? resume.mode : item.mode;
@@ -59,7 +59,7 @@ function ContinueCard({ item, onRemove }: { item: HistoryItem; onRemove: (id: st
         {item.englishName || item.title}
       </p>
       <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(item.id, item.ep); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(item.id); }}
         aria-label="Remove from continue watching"
         className="absolute right-1.5 top-1.5 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-black/60 text-white/80 opacity-0 transition-[opacity,color,border-color] hover:border-red-400/60 hover:text-red-400 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
       >
@@ -73,8 +73,8 @@ export default function ContinueWatching() {
   const items = useContinueWatching();
   const { toast } = useToast();
 
-  const remove = useCallback((id: string, ep: number) => {
-    removeFromHistory(id, ep);
+  const remove = useCallback((id: string) => {
+    removeShowFromHistory(id);
     toast("Removed from history");
   }, [toast]);
 

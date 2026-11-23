@@ -247,7 +247,17 @@ export function addToHistory(item: Omit<HistoryItem, "timestamp">) {
   // A malformed `ep` from the URL (ep=abc → Number → NaN) would poison the
   // list: dedupe/compare logic downstream silently never matches NaN.
   if (!Number.isFinite(item.ep)) return;
-  const hist = getHistory().filter((i) => !(i.id === item.id && i.ep === item.ep));
+  const malId = (item.malId || "").trim();
+  // One show can arrive under several ids (AllAnime hash, AniList/MAL numeric,
+  // kitsu-…). Drop an existing row for the same episode under ANY alias, not
+  // just the exact id, or a revisit creates a second copy of the show.
+  const hist = getHistory().filter(
+    (i) =>
+      !(
+        i.ep === item.ep &&
+        (i.id === item.id || (!!malId && malId !== "0" && (i.malId || "").trim() === malId))
+      ),
+  );
   hist.unshift({ ...item, timestamp: Date.now() });
   if (hist.length > 100) hist.length = 100;
   set("history", hist);
@@ -256,14 +266,20 @@ export function addToHistory(item: Omit<HistoryItem, "timestamp">) {
 }
 
 export function removeFromHistory(id: string, ep: number) {
-  set("history", getHistory().filter((i) => !(i.id === id && i.ep === ep)));
+  const hist = getHistory();
+  const keys = new Set(hist.filter((i) => i.id === id && i.ep === ep).map(historyKey));
+  set("history", hist.filter((i) => !(i.ep === ep && keys.has(historyKey(i)))));
   invalidate("history", "anime-continue");
   invalidatePrefix("watched:");
 }
 
 /** Remove EVERY episode row of one show (history page rows are per-show). */
 export function removeShowFromHistory(id: string) {
-  set("history", getHistory().filter((i) => i.id !== id));
+  const hist = getHistory();
+  // Collect every alias this show was stored under so removing one card does
+  // not leave its duplicate behind.
+  const keys = new Set(hist.filter((i) => i.id === id).map(historyKey));
+  set("history", keys.size ? hist.filter((i) => !keys.has(historyKey(i))) : hist);
   invalidate("history", "anime-continue");
   invalidatePrefix("watched:");
 }
@@ -272,24 +288,54 @@ function getHistory(): HistoryItem[] {
   return get<HistoryItem[]>("history") ?? [];
 }
 
+/** Stable per-show identity: MAL id when known, else the raw id. */
+function historyKey(h: HistoryItem): string {
+  const malId = (h.malId || "").trim();
+  return malId && malId !== "0" ? `mal:${malId}` : `id:${h.id}`;
+}
+
+/** AniList/MAL ids are numeric; AllAnime hashes and `kitsu-…` are canonical. */
+function isCanonicalAnimeId(id: string): boolean {
+  return /^[0-9a-f]{16,}$/i.test(id) || id.startsWith("kitsu-");
+}
+
+/**
+ * One row per show, newest first. Rows written before ids were canonicalised
+ * (same show stored under a numeric id AND its AllAnime hash) collapse here,
+ * and the surviving row points at the canonical id so resume keys still match.
+ */
+function dedupeHistory(hist: HistoryItem[]): HistoryItem[] {
+  const groups = new Map<string, HistoryItem[]>();
+  for (const h of hist) {
+    const key = historyKey(h);
+    const rows = groups.get(key);
+    if (rows) rows.push(h);
+    else groups.set(key, [h]);
+  }
+
+  const out: HistoryItem[] = [];
+  for (const rows of groups.values()) {
+    let newest = rows[0];
+    for (const r of rows) {
+      if ((r.timestamp ?? 0) > (newest.timestamp ?? 0)) newest = r;
+    }
+    // Prefer the newest row's id when it is already canonical (a re-upload can
+    // legitimately get a new hash); otherwise borrow a canonical alias from an
+    // older row so links and resume keys stop using the numeric id.
+    const canonical = isCanonicalAnimeId(newest.id)
+      ? newest.id
+      : rows.map((r) => r.id).find(isCanonicalAnimeId);
+    out.push(canonical && canonical !== newest.id ? { ...newest, id: canonical } : newest);
+  }
+  return out.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+}
+
 export function getAllHistory(): HistoryItem[] {
-  const hist = getHistory();
-  const seen = new Set<string>();
-  return hist.filter((h) => {
-    if (seen.has(h.id)) return false;
-    seen.add(h.id);
-    return true;
-  });
+  return dedupeHistory(getHistory());
 }
 
 export function getContinueWatching(): HistoryItem[] {
-  const hist = getHistory();
-  const seen = new Set<string>();
-  return hist.filter((h) => {
-    if (seen.has(h.id)) return false;
-    seen.add(h.id);
-    return true;
-  }).slice(0, 12);
+  return dedupeHistory(getHistory()).slice(0, 12);
 }
 
 export const getContinueWatchingSnapshot = (): HistoryItem[] =>
@@ -298,13 +344,19 @@ export const getContinueWatchingSnapshot = (): HistoryItem[] =>
 export const getAllHistorySnapshot = (): HistoryItem[] => cachedSnapshot("history", getAllHistory);
 
 export function getLastWatched(showId: string): HistoryItem | null {
-  return getHistory().find((h) => h.id === showId) ?? null;
+  return (
+    dedupeHistory(getHistory()).find(
+      (h) => h.id === showId || (!!h.malId && h.malId === showId),
+    ) ?? null
+  );
 }
 
 export function getWatchedUpTo(showId: string, mode: "sub" | "dub"): number {
-  const hist = getHistory().filter((h) => h.id === showId && h.mode === mode);
+  const hist = getHistory().filter(
+    (h) => (h.id === showId || (!!h.malId && h.malId === showId)) && h.mode === mode,
+  );
   if (hist.length === 0) return 0;
-  return hist.reduce((latest, h) => (h.timestamp > latest.timestamp ? h : latest)).ep;
+  return hist.reduce((latest, h) => ((h.timestamp ?? 0) > (latest.timestamp ?? 0) ? h : latest)).ep;
 }
 
 export const getWatchedUpToSnapshot = (showId: string, mode: "sub" | "dub"): number =>

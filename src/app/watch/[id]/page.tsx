@@ -452,7 +452,7 @@ function WatchContent() {
     if (historyWrittenKeyRef.current === streamKey) return;
     historyWrittenKeyRef.current = streamKey;
     addToHistory({
-      id,
+      id: showInfo._id || id,
       title: showInfo.name,
       englishName: showInfo.englishName,
       thumbnail: showInfo.thumbnail,
