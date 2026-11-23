@@ -553,24 +553,10 @@ export default function VideoPlayer({
           return;
         }
         stallStartRef.current.attempts++;
-        const attempt = stallStartRef.current.attempts;
-        if (attempt === 1) {
-          // First: mimic "skip ahead and come back" — seek forward, then back
-          // to the stall point. This forces the browser to issue a fresh Range
-          // request instead of waiting on the dead connection.
-          const saved = stallStartRef.current.pos;
-          try { el.currentTime = Math.min(saved + 3, (el.duration || Infinity) - 0.5); } catch { /* ignore */ }
-          setTimeout(() => {
-            const el2 = videoRef.current;
-            if (!el2) return;
-            try { el2.currentTime = saved; } catch { /* ignore */ }
-            void el2.play().catch(() => {});
-          }, 300);
-          stallTimerRef.current = setTimeout(tryRecover, 4000);
-        } else if (attempt === 2) {
-          // Second: the nudge didn't help — reload the source from the stall
-          // point so the proxy opens a fresh connection (mirrors what "skip
-          // ahead and come back" does manually).
+        if (stallStartRef.current.attempts === 1) {
+          // One clean reconnect: reload the source and restore the position.
+          // The proxy resumes dead upstream connections itself, so this is a
+          // last resort for a connection that is dead end-to-end.
           const saved = el.currentTime;
           reloadingRef.current = true;
           el.src = srcRef.current || el.src;
@@ -582,18 +568,18 @@ export default function VideoPlayer({
             void el.play().catch(() => {});
           };
           el.addEventListener("canplay", onCanPlay);
-          setTimeout(() => { reloadingRef.current = false; }, 8000);
-          stallTimerRef.current = setTimeout(tryRecover, 5000);
+          setTimeout(() => { reloadingRef.current = false; }, 10000);
+          stallTimerRef.current = setTimeout(tryRecover, 8000);
         } else {
-          // Third: still stuck — escalate to source failover so the watch page
-          // can hop to another server or re-fetch the stream.
+          // Still stuck — escalate to source failover so the watch page can
+          // hop to another server or re-fetch the stream.
           clearStallTimer();
           setShowError(true);
           setBuffering(false);
           onErrorRef.current?.();
         }
       };
-      stallTimerRef.current = setTimeout(tryRecover, 4000);
+      stallTimerRef.current = setTimeout(tryRecover, 10000);
     };
     const onStalled = () => onWaiting();
     const onReady = () => { setBuffering(false); clearStallTimer(); };

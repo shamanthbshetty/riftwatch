@@ -25,6 +25,11 @@ pub struct AppState {
     /// Same client but with redirects disabled — proxies re-validate every hop
     /// through `safe_url::safe_get` instead of following them blindly.
     pub http_safe: reqwest::Client,
+    /// Media streaming client: no total request timeout. A total timeout cuts
+    /// long downloads off mid-body (a 30s cap severed every video stream and
+    /// looked like an endless buffering stall). Idle reads are still bounded so
+    /// a dead connection cannot hang a player forever.
+    pub http_stream: reqwest::Client,
 }
 
 // Desktop app: a handful of worker threads is plenty and keeps idle CPU/memory low.
@@ -49,7 +54,16 @@ async fn main() {
         .build()
         .expect("http safe client");
 
-    let state = AppState { http: client, http_safe: client_safe };
+    let client_stream = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        // Per-read idle timeout only — never a total body deadline.
+        .read_timeout(std::time::Duration::from_secs(25))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("http stream client");
+
+    let state = AppState { http: client, http_safe: client_safe, http_stream: client_stream };
 
     let app = Router::new()
         .route("/health", get(health))
