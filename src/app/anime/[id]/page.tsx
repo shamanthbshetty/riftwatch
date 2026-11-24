@@ -489,7 +489,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
             onClick={() => setTrailerOpen(false)}
           >
             <div
-              className="relative my-auto w-full max-w-[calc(100vw-2rem)] aspect-video mx-auto"
+              className="relative my-auto w-full mx-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <button
