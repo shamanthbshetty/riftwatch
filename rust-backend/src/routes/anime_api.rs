@@ -284,7 +284,7 @@ pub async fn recommendations(State(state): State<AppState>, Query(q): Query<RelQ
     let id = parse_id(&q.id);
     let mal_id = parse_id(&q.mal_id);
     match anilist::get_ani_recommendations(&state.http, id, mal_id).await {
-        Ok(v) => Json(json!({ "results": v })).into_response(),
+        Ok(v) => Json(v).into_response(),
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "error": format!("Error: {e}") })),

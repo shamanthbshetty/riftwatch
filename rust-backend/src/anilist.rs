@@ -487,19 +487,19 @@ pub async fn get_ani_recommendations(
     client: &reqwest::Client,
     id: Option<u64>,
     mal_id: Option<u64>,
-) -> Result<Vec<Value>, String> {
+) -> Result<Value, String> {
     let (query, vars) = if let Some(v) = id.filter(|v| *v > 0) {
         (
-            r#"query($id: Int) { Media(id: $id, type: ANIME) { recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } } } } } }"#.to_string(),
+            r#"query($id: Int) { Media(id: $id, type: ANIME) { genres recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } genres } } } } }"#.to_string(),
             json!({ "id": v }),
         )
     } else if let Some(v) = mal_id.filter(|v| *v > 0) {
         (
-            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } } } } } }"#.to_string(),
+            r#"query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { genres recommendations { nodes { mediaRecommendation { id title { english romaji } coverImage { large } genres } } } } }"#.to_string(),
             json!({ "idMal": v }),
         )
     } else {
-        return Ok(vec![]);
+        return Ok(json!({ "results": [], "seedGenres": [] }));
     };
     let j = anilist_post(client, &query, &vars, Duration::from_secs(8)).await?;
     let nodes = j["data"]["Media"]["recommendations"]["nodes"]
@@ -524,12 +524,14 @@ pub async fn get_ani_recommendations(
             .unwrap_or("")
             .to_string();
         let thumbnail = m["coverImage"]["large"].as_str().unwrap_or("").to_string();
-        out.push(json!({ "id": rid, "title": title, "thumbnail": thumbnail }));
+        let genres: Vec<Value> = m["genres"].as_array().cloned().unwrap_or_default();
+        out.push(json!({ "id": rid, "title": title, "thumbnail": thumbnail, "genres": genres }));
         if out.len() >= 12 {
             break;
         }
     }
-    Ok(out)
+    let seed_genres: Vec<Value> = j["data"]["Media"]["genres"].as_array().cloned().unwrap_or_default();
+    Ok(json!({ "results": out, "seedGenres": seed_genres }))
 }
 
 // ── Schedule (replaces jikan getAnimeSchedule) ──
