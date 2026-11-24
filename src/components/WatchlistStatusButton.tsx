@@ -84,6 +84,13 @@ export function StatusMenuList({
 interface WatchlistStatusButtonProps {
   inList: boolean;
   status: WatchStatus | null;
+  /**
+   * Status inferred from watch history. A show that has been watched is
+   * already "tracked" even if it was never added to the watchlist, so the
+   * button shows that status instead of "+ Watchlist". Picking a status still
+   * adds the show to the watchlist.
+   */
+  historyStatus?: WatchStatus | null;
   /** Compact sizing for the player controls bar. */
   compact?: boolean;
   onAdd: (status: WatchStatus) => void;
@@ -97,7 +104,15 @@ interface WatchlistStatusButtonProps {
  * reopens the same menu to change or remove it. Shared by the anime/movie
  * detail pages and the watch pages.
  */
-export default function WatchlistStatusButton({ inList, status, compact, onAdd, onChange, onRemove }: WatchlistStatusButtonProps) {
+export default function WatchlistStatusButton({
+  inList,
+  status,
+  historyStatus,
+  compact,
+  onAdd,
+  onChange,
+  onRemove,
+}: WatchlistStatusButtonProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -113,7 +128,8 @@ export default function WatchlistStatusButton({ inList, status, compact, onAdd, 
   const size = compact
     ? "px-3 py-1.5 rounded-lg text-xs font-medium"
     : "px-4 py-2 rounded-lg text-sm font-medium";
-  const current = status ?? "watching";
+  const tracked = inList || historyStatus != null;
+  const current = status ?? historyStatus ?? "watching";
 
   function pick(s: WatchStatus) {
     if (inList) onChange(s);
@@ -126,12 +142,12 @@ export default function WatchlistStatusButton({ inList, status, compact, onAdd, 
       <button
         onClick={() => setOpen((v) => !v)}
         className={`${size} btn-tap inline-flex items-center gap-2 border transition-colors ${
-          inList
+          tracked
             ? "bg-accent/15 text-accent border-accent/40 hover:bg-accent/25"
             : "bg-surface hover:bg-surface-hover text-text-muted border-border"
         }`}
       >
-        {inList ? (
+        {tracked ? (
           <>
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[current]}`} />
             {STATUS_LABELS[current]}
@@ -146,7 +162,7 @@ export default function WatchlistStatusButton({ inList, status, compact, onAdd, 
       {open && (
         <div className={`absolute left-0 top-full mt-1.5 w-44 z-40 ${STATUS_MENU_CLASS} origin-top-left`}>
           <StatusMenuList
-            current={inList ? current : undefined}
+            current={tracked ? current : undefined}
             onPick={pick}
             onRemove={inList ? () => { onRemove(); setOpen(false); } : undefined}
           />

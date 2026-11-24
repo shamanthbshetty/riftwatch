@@ -19,7 +19,7 @@ function ContinueCard({ item, onRemove }: { item: HistoryItem; onRemove: (id: st
   const frac = duration > 0 && t > 0 ? Math.min(0.98, t / duration) : 0;
 
   return (
-    <div className="group relative w-[168px] flex-shrink-0">
+    <div className="group relative rail-card">
       <Link
         href={`/watch/${item.id}?ep=${targetEp}&mode=${targetMode}${item.title ? `&title=${encodeURIComponent(item.title)}` : ""}`}
         className="block"

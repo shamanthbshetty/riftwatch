@@ -19,7 +19,7 @@ interface TopRatedData {
   tv: { results: MovieResult[] };
 }
 
-const RAIL_CARD = "w-[168px] flex-shrink-0";
+const RAIL_CARD = "rail-card";
 
 export default function MoviesSection({ children }: { children?: ReactNode }) {
   const [trending, setTrending] = useState<TrendingData | null>(null);

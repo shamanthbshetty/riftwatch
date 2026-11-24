@@ -21,7 +21,7 @@ function ContinueMovieCard({ item, onRemove }: { item: MovieHistoryItem; onRemov
   const where = item.type === "tv" && item.season ? `S${item.season} E${item.episode}` : "Film";
 
   return (
-    <div className="group relative w-[168px] flex-shrink-0">
+    <div className="group relative rail-card">
       <Link
         href={`/movies/${item.id}/watch?type=${item.type}${item.season ? `&season=${item.season}&episode=${item.episode}` : ""}`}
         className="block"

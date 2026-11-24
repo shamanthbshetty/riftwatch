@@ -12,7 +12,8 @@ import SectionHeader from "@/components/SectionHeader";
 import EmptyState from "@/components/Skeleton";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
 import { addToWatchlist, removeFromWatchlist, setWatchlistStatus, addToHistory, formatMediaTime, type WatchStatus } from "@/lib/storage";
-import { useWatchlistItems, useShowResume, useWatchedUpTo } from "@/lib/useWatchlists";
+import { useWatchlistItems, useAllHistory, useShowResume, useWatchedUpTo } from "@/lib/useWatchlists";
+import { showRefMatches } from "@/lib/show-match";
 import { sameShow } from "@/lib/show-id";
 import { useToast } from "@/lib/toast";
 
@@ -60,6 +61,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
   const [mode, setMode] = useState<"sub" | "dub">("sub");
   const [retryKey, setRetryKey] = useState(0);
   const watchlist = useWatchlistItems();
+  const history = useAllHistory();
   const resume = useShowResume(id);
   const { toast } = useToast();
 
@@ -105,6 +107,33 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
     : null;
   const inWatchlist = wlEntry !== null;
   const wlStatus = wlEntry?.status ?? null;
+
+  // Watching writes history, so a show can already be tracked before the user
+  // ever adds it to the watchlist. Use the newest history row to show
+  // "Watching"/"Completed" instead of offering "+ Watchlist" again.
+  const historyRow = show
+    ? history.find((h) =>
+        showRefMatches(h, {
+          id,
+          canonicalId: show._id,
+          malId: show.malId,
+          title: show.name,
+          englishName: show.englishName,
+        })
+      ) ?? null
+    : null;
+  const historyLastEp = historyRow
+    ? (show?.availableEpisodesDetail?.[historyRow.mode] ?? []).reduce(
+        (max, value) => Math.max(max, Number(value) || 0),
+        0
+      )
+    : 0;
+  const showStillAiring = /releasing|airing|not yet released/i.test(show?.status || "");
+  const historyStatus: WatchStatus | null = historyRow
+    ? !showStillAiring && historyLastEp > 0 && historyRow.ep >= historyLastEp
+      ? "completed"
+      : "watching"
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -223,7 +252,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
       englishName: show.englishName,
       thumbnail: show.thumbnail,
       malId: show.malId ?? "",
-      lastEp: 0,
+      lastEp: historyRow?.ep ?? 0,
       mode,
       status,
     });
@@ -369,7 +398,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
                 {show.description}
               </p>
             )}
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex items-center gap-3 pt-2 flex-wrap">
               {episodes.length > 0 ? (
                 <button
                   onClick={() =>
@@ -405,6 +434,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
               <WatchlistStatusButton
                 inList={inWatchlist}
                 status={wlStatus}
+                historyStatus={historyStatus}
                 onAdd={addWithStatus}
                 onChange={changeStatus}
                 onRemove={removeFromList}
@@ -443,7 +473,7 @@ export default function AnimeDetailPage({ params }: { params: Promise<{ id: stri
                 title={r.title}
                 image={r.thumbnail}
                 meta={[RELATION_LABELS[r.relation] ?? r.relation]}
-                className="w-[168px] flex-shrink-0"
+                className="rail-card"
               />
             ))}
           </Rail>

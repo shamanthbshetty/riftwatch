@@ -10,7 +10,8 @@ import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStat
 
 import { addToHistory, getLastWatched, getWatchlist, addToWatchlist, removeFromWatchlist, setWatchlistStatus, setAutoplayPref, setSkipPref, type WatchStatus } from "@/lib/storage";
 import { sameShow } from "@/lib/show-id";
-import { useWatchlistItems, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
+import { showRefMatches } from "@/lib/show-match";
+import { useWatchlistItems, useAllHistory, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 
 interface Source {
@@ -106,6 +107,7 @@ function WatchContent() {
   }, [id, epParam, router]);
 
   const watchlist = useWatchlistItems();
+  const history = useAllHistory();
   const { toast } = useToast();
 
   // Series metadata is keyed by show id.
@@ -128,6 +130,21 @@ function WatchContent() {
     : null;
   const inWatchlist = wlEntry !== null;
   const wlStatus = wlEntry?.status ?? null;
+
+  // Playback writes history, so this show is already "Watching" even when the
+  // user never added it to the watchlist explicitly.
+  const historyRow = showInfo
+    ? history.find((h) =>
+        showRefMatches(h, {
+          id,
+          canonicalId: showInfo._id,
+          malId: showInfo.malId,
+          title: showInfo.name,
+          englishName: showInfo.englishName,
+        })
+      ) ?? null
+    : null;
+  const historyStatus: WatchStatus | null = historyRow ? "watching" : null;
 
   // Stream state is keyed by the full request so switching episode/mode/series
   // can never render the previous request's sources. Deliberately NOT including
@@ -682,6 +699,7 @@ function WatchContent() {
             compact
             inList={inWatchlist}
             status={wlStatus}
+            historyStatus={historyStatus}
             onAdd={addWithStatus}
             onChange={changeStatus}
             onRemove={removeFromList}

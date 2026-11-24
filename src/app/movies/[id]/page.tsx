@@ -297,7 +297,7 @@ export default function MovieDetailPage() {
           </div>
           <Rail itemCount={recs.length}>
             {recs.map((m) => (
-              <div key={m.id} className="flex-shrink-0 w-[180px]">
+              <div key={m.id} className="rail-card rail-card-wide">
                 <MovieCard movie={m} showScore />
               </div>
             ))}

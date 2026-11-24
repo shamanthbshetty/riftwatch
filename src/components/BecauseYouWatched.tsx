@@ -130,7 +130,7 @@ export default function BecauseYouWatched() {
             href={`/anime/${r.id}`}
             title={r.title}
             image={r.thumbnail}
-            className="w-[168px] flex-shrink-0"
+            className="rail-card"
           />
         ))}
       </Rail>

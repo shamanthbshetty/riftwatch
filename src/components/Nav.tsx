@@ -304,9 +304,9 @@ export default function Nav() {
     <>
       {/* Pill Nav */}
       <nav className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-3xl">
-        <div className="bg-surface/80 backdrop-blur-xl border border-border rounded-full px-2 py-1.5 flex items-center gap-1 shadow-lg shadow-black/20">
+        <div className="bg-surface/80 backdrop-blur-xl border border-border rounded-full px-1.5 sm:px-2 py-1.5 flex items-center gap-1 shadow-lg shadow-black/20">
           {/* Logo */}
-          <Link href={`/?tab=${tab}`} className="flex items-center gap-2 shrink-0 pl-2 pr-3 group">
+          <Link href={`/?tab=${tab}`} className="max-[399px]:hidden flex items-center gap-2 shrink-0 pl-2 pr-2 sm:pr-3 group">
             <svg className="w-7 h-7" viewBox="0 0 32 32" fill="none">
               <circle cx="16" cy="16" r="13" stroke="currentColor" className="text-accent" strokeWidth="2" fill="none" />
               <path d="M16 3L14 14L17 16L13 29" stroke="currentColor" className="text-accent" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -318,13 +318,13 @@ export default function Nav() {
           </Link>
 
            {/* Tab links */}
-          <Link href={`/?tab=anime`} className={`px-3 py-1.5 rounded-full text-sm transition-colors ${tab === "anime" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
+          <Link href={`/?tab=anime`} className={`px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors ${tab === "anime" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
             Anime
           </Link>
-          <Link href={`/?tab=movies`} className={`px-3 py-1.5 rounded-full text-sm transition-colors ${tab === "movies" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
+          <Link href={`/?tab=movies`} className={`px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors ${tab === "movies" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
             Movies
           </Link>
-          <Link href={`/watchlist?tab=${tab}`} className={`px-3 py-1.5 rounded-full text-sm transition-colors ${pathname === "/watchlist" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
+          <Link href={`/watchlist?tab=${tab}`} className={`px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors ${pathname === "/watchlist" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`}>
             Watchlist
           </Link>
 
@@ -432,7 +432,7 @@ export default function Nav() {
             </div>
 
             {/* Theme toggle */}
-            <button onClick={toggleTheme} className="p-2 rounded-full text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors btn-tap" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+            <button onClick={toggleTheme} className="max-[499px]:hidden p-2 rounded-full text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors btn-tap" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
               {theme === "dark" ? (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
               ) : (
@@ -441,12 +441,12 @@ export default function Nav() {
             </button>
 
             {/* Random pick (anime: 7+ incl. hidden gems; movies: rated pool) */}
-            <button onClick={shuffleRandom} className="p-2 rounded-full text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors btn-tap" title={isMovies ? "Random movie or show" : "Random anime"} aria-label={isMovies ? "Random movie" : "Random anime"}>
+            <button onClick={shuffleRandom} className="max-[499px]:hidden p-2 rounded-full text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors btn-tap" title={isMovies ? "Random movie or show" : "Random anime"} aria-label={isMovies ? "Random movie" : "Random anime"}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></svg>
             </button>
 
             {/* Settings */}
-            <Link href="/settings" className={`p-2 rounded-full transition-colors ${pathname === "/settings" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`} title="Settings">
+            <Link href="/settings" className={`max-[499px]:hidden p-2 rounded-full transition-colors ${pathname === "/settings" ? "bg-surface-hover text-foreground" : "text-text-muted hover:text-foreground hover:bg-surface-hover"}`} title="Settings">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" strokeWidth={2} /></svg>
             </Link>
           </div>

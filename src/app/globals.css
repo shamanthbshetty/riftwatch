@@ -107,6 +107,18 @@ h1, h2, h3, h4, h5, h6 {
 .carousel-scroll img { -webkit-user-drag: none; user-drag: none; pointer-events: none; -webkit-user-select: none; user-select: none; }
 .carousel-scroll a { -webkit-user-drag: none; user-drag: none; }
 
+/* Rail cards: two fit the available width on narrow windows (e.g. a browser
+   with vertical tabs), and cap at their design width on larger ones. The
+   14px matches .carousel-scroll's gap so two cards + gap = 100%. */
+.rail-card {
+  flex: 0 0 calc((100% - 14px) / 2);
+  max-width: 168px;
+  min-width: 0;
+}
+.rail-card-wide {
+  max-width: 180px;
+}
+
 /* Card hover: one motion signature — a 2px lift and a hairline highlight.
    The poster inside does NOT scale too (double-zoom read as a toy). Shadow is
    short and close, not a 48px black cloud. */

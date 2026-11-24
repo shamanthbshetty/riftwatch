@@ -12,7 +12,7 @@ export default function RailSkeleton() {
       </div>
       <div className="carousel-scroll">
         {Array.from({ length: 7 }).map((_, i) => (
-          <Skeleton key={i} className="aspect-[3/4] w-[168px] flex-shrink-0" />
+          <Skeleton key={i} className="aspect-[3/4] rail-card" />
         ))}
       </div>
     </section>
