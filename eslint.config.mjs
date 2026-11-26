@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Vendored agent-skill tooling — not project code.
     ".agents/**",
+    // Tauri desktop build artifacts — not project code.
+    "src-tauri/target/**",
+    "src-tauri/gen/**",
   ]),
 ]);
 

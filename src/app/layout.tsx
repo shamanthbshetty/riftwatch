@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import Notifiers from "@/components/Notifiers";
+import TauriBootstrap from "@/components/TauriBootstrap";
 import { ToastProvider } from "@/lib/toast";
 import ScrollToTop from "@/components/ScrollToTop";
 
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <ToastProvider>
+          <TauriBootstrap />
           <Notifiers />
           <Suspense>
             <Nav />
