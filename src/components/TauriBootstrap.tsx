@@ -10,6 +10,14 @@ import { isDynamicAppPath } from "@/lib/tauri-router";
 installFetchPatch();
 
 if (typeof document !== "undefined") {
+  // Suppress the WebView2 browser context menu. Keep native copy/paste inside
+  // text fields, but no "Save link as"/"View page source" on a desktop app.
+  document.addEventListener("contextmenu", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("input, textarea, [contenteditable='true']")) return;
+    event.preventDefault();
+  });
+
   document.addEventListener(
     "click",
     (event) => {

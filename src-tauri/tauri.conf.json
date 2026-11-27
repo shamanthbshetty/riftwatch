@@ -14,8 +14,8 @@
       {
         "title": "RiftWatch",
         "url": "riftwatch://localhost/",
-        "width": 1280,
-        "height": 800,
+        "width": 1180,
+        "height": 700,
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,

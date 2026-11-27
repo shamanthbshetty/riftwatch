@@ -222,6 +222,14 @@ pub fn run() {
                 )?;
             }
 
+            // Always open fully on-screen and focused. Windows can restore a
+            // stale position from a previous session, which sometimes puts the
+            // window behind the taskbar or below the visible screen area.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.center();
+                let _ = window.set_focus();
+            }
+
             let child = spawn_backend(app.handle())?;
             if let Some(state) = app.try_state::<BackendChild>() {
                 *state.0.lock().unwrap() = Some(child);
