@@ -1,5 +1,5 @@
 [package]
-name = "app"
+name = "riftwatch"
 version = "0.3.0"
 description = "RiftWatch desktop app"
 authors = ["you"]
