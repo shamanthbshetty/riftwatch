@@ -119,6 +119,11 @@ export default function SettingsPage() {
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" /></svg>
           Data Management
         </h2>
+        <p className="text-xs text-text-secondary -mt-1">
+          Your data lives in this app&apos;s local storage. To bring over history or watchlists
+          from the old web app or a previous desktop install, export them there first, then
+          import the JSON file here.
+        </p>
         <div className="bg-surface rounded-xl p-4 space-y-4 border border-border/50">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">

@@ -45,6 +45,20 @@ interface ShowInfo {
 const EMPTY_SOURCES: Source[] = [];
 const EMPTY_SUBTITLES: NonNullable<Source["subtitles"]> = [];
 const EMPTY_TITLES: Record<string, string> = {};
+const TITLES_CACHE_PREFIX = "rw:titles:";
+
+// Episode names come from a separate upstream lookup. Keep them next to the
+// cached show info so repeat visits can render names instantly, before the
+// network responds.
+function readCachedTitles(id: string): Record<string, string> {
+  if (typeof window === "undefined") return EMPTY_TITLES;
+  try {
+    return JSON.parse(localStorage.getItem(`${TITLES_CACHE_PREFIX}${id}`) || "{}") || EMPTY_TITLES;
+  } catch {
+    return EMPTY_TITLES;
+  }
+}
+
 // Only used when the backend proves the id doesn't exist (404). A failed
 // upstream lookup must not render this.
 const EP_NOT_FOUND = "This anime could not be found. The link may be outdated.";
@@ -121,7 +135,10 @@ function WatchContent() {
   } | null>(null);
   const meta = episodesState?.id === id ? episodesState : null;
   const showInfo = meta?.showInfo ?? null;
-  const epTitles = meta?.titles ?? EMPTY_TITLES;
+  const cachedEpTitles = useMemo(() => readCachedTitles(id), [id]);
+  // Fresh titles win; while they load (or on a cached/offline visit) show the
+  // names saved from last time instead of blank rows.
+  const epTitles = meta?.titles && Object.keys(meta.titles).length ? meta.titles : cachedEpTitles;
   const epError = meta?.epError ?? "";
 
   // Matched against every identity this page can prove — the entry may have
@@ -357,6 +374,19 @@ function WatchContent() {
   useEffect(() => {
     let cancelled = false;
     async function loadEpisodes(attempt = 0) {
+      // Episode names are a separate lookup. Cache them so they are visible
+      // immediately on the next visit, even if the upstream is down.
+      const refreshTitles = (showId: string, malId?: string, name?: string) => {
+        if (!malId) return;
+        fetch(`/api/titles?malId=${encodeURIComponent(malId)}&title=${encodeURIComponent(name ?? "")}`)
+          .then((r) => r.json())
+          .then((t: Record<string, string>) => {
+            if (cancelled) return;
+            try { localStorage.setItem(`${TITLES_CACHE_PREFIX}${showId}`, JSON.stringify(t)); } catch { /* ignore */ }
+            setEpisodesState((prev) => (prev && prev.id === showId ? { ...prev, titles: t } : prev));
+          })
+          .catch(() => {});
+      };
       const tp = titleRef.current
         ? `&title=${encodeURIComponent(titleRef.current)}`
         : (() => { try { const c = JSON.parse(localStorage.getItem(`rw:show:${id}`) || "null"); return c?.name ? `&title=${encodeURIComponent(c.name)}` : ""; } catch { return ""; } })();
@@ -399,8 +429,9 @@ function WatchContent() {
                       allDubEps,
                     };
                     if (!cancelled) {
-                      setEpisodesState({ id, titles: {}, showInfo: info, epError: "" });
+                      setEpisodesState({ id, titles: cachedEpTitles, showInfo: info, epError: "" });
                       try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* ignore */ }
+                      refreshTitles(id, info.malId, info.englishName || info.name);
                     }
                     return;
                   }
@@ -413,10 +444,11 @@ function WatchContent() {
           let cached: ShowInfo | null = null;
           try { cached = JSON.parse(localStorage.getItem(`rw:show:${id}`) || "null"); } catch { /* ignore */ }
           if (cached && !cancelled) {
-            setEpisodesState({ id, titles: {}, showInfo: cached, epError: "" });
+            setEpisodesState({ id, titles: cachedEpTitles, showInfo: cached, epError: "" });
+            refreshTitles(id, cached.malId, cached.englishName || cached.name);
             return;
           }
-          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: status === 404 ? EP_NOT_FOUND : EP_UPSTREAM_DOWN });
+          if (!cancelled) setEpisodesState({ id, titles: cachedEpTitles, showInfo: null, epError: status === 404 ? EP_NOT_FOUND : EP_UPSTREAM_DOWN });
           return;
         }
         const d = await r.json();
@@ -426,10 +458,11 @@ function WatchContent() {
           let cached: ShowInfo | null = null;
           try { cached = JSON.parse(localStorage.getItem(`rw:show:${id}`) || "null"); } catch { /* ignore */ }
           if (cached && !cancelled) {
-            setEpisodesState({ id, titles: {}, showInfo: cached, epError: "" });
+            setEpisodesState({ id, titles: cachedEpTitles, showInfo: cached, epError: "" });
+            refreshTitles(id, cached.malId, cached.englishName || cached.name);
             return;
           }
-          if (!cancelled) setEpisodesState({ id, titles: {}, showInfo: null, epError: EP_UPSTREAM_DOWN });
+          if (!cancelled) setEpisodesState({ id, titles: cachedEpTitles, showInfo: null, epError: EP_UPSTREAM_DOWN });
           return;
         }
         const allSubEps = (d.availableEpisodesDetail?.sub ?? []).map(Number).sort((a: number, b: number) => a - b);
@@ -445,30 +478,24 @@ function WatchContent() {
           allSubEps,
           allDubEps,
         };
-        setEpisodesState({ id, titles: {}, showInfo: info, epError: "" });
+        setEpisodesState({ id, titles: cachedEpTitles, showInfo: info, epError: "" });
         try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* ignore */ }
-        if (d.malId) {
-          fetch(`/api/titles?malId=${encodeURIComponent(d.malId)}&title=${encodeURIComponent(d.englishName || d.name || "")}`)
-            .then((r) => r.json())
-            .then((t) => {
-              if (cancelled) return;
-              setEpisodesState((prev) => (prev && prev.id === id ? { ...prev, titles: t } : prev));
-            })
-            .catch(() => {});
-        }
+        refreshTitles(id, d.malId, d.englishName || d.name);
       } catch {
         if (!cancelled && attempt < 2) setTimeout(() => loadEpisodes(attempt + 1), 800);
         else if (!cancelled) {
           let cached: ShowInfo | null = null;
           try { cached = JSON.parse(localStorage.getItem(`rw:show:${id}`) || "null"); } catch { /* ignore */ }
-          if (cached) setEpisodesState({ id, titles: {}, showInfo: cached, epError: "" });
-          else setEpisodesState({ id, titles: {}, showInfo: null, epError: "Failed to load anime info. Please try again later." });
+          if (cached) {
+            setEpisodesState({ id, titles: cachedEpTitles, showInfo: cached, epError: "" });
+            refreshTitles(id, cached.malId, cached.englishName || cached.name);
+          } else setEpisodesState({ id, titles: cachedEpTitles, showInfo: null, epError: "Failed to load anime info. Please try again later." });
         }
       }
     }
     loadEpisodes();
     return () => { cancelled = true; };
-  }, [id, epLoadKey]);
+  }, [id, epLoadKey, cachedEpTitles]);
 
   // History is written when playback ACTUALLY starts, not when metadata
   // lands: merely opening (or failing to load) an episode must not mark it
