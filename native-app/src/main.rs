@@ -6,8 +6,8 @@ mod models;
 mod store;
 
 use futures::SinkExt;
-use iced::widget::{button, column, row, scrollable, text, text_input};
-use iced::{Element, Length, Subscription, Task};
+use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::{Background, Color, Element, Length, Subscription, Task};
 use models::{HistoryEntry, MediaItem, Settings, WatchEntry};
 use store::Store;
 use tokio::io::AsyncBufReadExt;
@@ -464,10 +464,14 @@ impl App {
             body = body.push(text("Loading…"));
         }
 
-        column![body]
-            .padding(24)
+        container(column![body].padding(24).width(Length::Fill).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.10))),
+                text_color: Some(Color::WHITE),
+                ..Default::default()
+            })
             .into()
     }
 
