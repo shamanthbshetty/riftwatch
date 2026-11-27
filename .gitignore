@@ -44,6 +44,7 @@ next-env.d.ts
 
 # rust build artifacts
 /rust-backend/target/
+/native-app/target/
 
 # tauri build artifacts
 /src-tauri/target/
