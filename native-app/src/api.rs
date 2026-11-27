@@ -25,6 +25,14 @@ pub fn popular(port: u16) -> impl std::future::Future<Output = Result<Vec<serde_
     get_json::<Vec<serde_json::Value>>(port, "/api/popular")
 }
 
+pub async fn stream(port: u16, id: &str, episode: u32, mode: &str) -> Result<serde_json::Value, String> {
+    let path = format!(
+        "/api/stream?id={}&ep={episode}&mode={mode}",
+        urlencode(id)
+    );
+    get_json::<serde_json::Value>(port, &path).await
+}
+
 pub async fn episodes(port: u16, id: &str) -> Result<serde_json::Value, String> {
     let path = format!("/api/episodes?id={}", urlencode(id));
     get_json::<serde_json::Value>(port, &path).await
@@ -35,8 +43,8 @@ pub async fn search(port: u16, query: &str) -> Result<Vec<serde_json::Value>, St
     get_json::<Vec<serde_json::Value>>(port, &path).await
 }
 
-/// Minimal percent-encoding for search terms. The backend decodes query args.
-fn urlencode(value: &str) -> String {
+/// Minimal percent-encoding for query/path arguments.
+pub fn urlencode(value: &str) -> String {
     let mut out = String::new();
     for byte in value.bytes() {
         match byte {

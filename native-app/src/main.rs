@@ -46,6 +46,10 @@ enum Message {
         item: MediaItem,
         episode: u32,
     },
+    StreamReady {
+        stream_url: String,
+        subtitles: Vec<String>,
+    },
     AddWatchlist(MediaItem),
     RemoveWatchlist(String),
     ToggleAutoplay(bool),
@@ -95,6 +99,75 @@ fn backend_path() -> std::path::PathBuf {
         release.join("..").join("..").join("..").join("rust-backend").join("target").join("release").join("riftwatch-backend.exe"),
     ];
     candidates.iter().find(|p| p.exists()).cloned().unwrap_or_else(|| candidates[0].clone())
+}
+
+/// mpv is bundled separately (native playback is not pure Rust). The Windows
+/// portable build lives in `bin/mpv` next to the executable or the crate.
+fn mpv_path() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let dir = exe.parent().unwrap_or(std::path::Path::new("."));
+    let candidates = [
+        dir.join("bin").join("mpv").join("mpv.exe"),
+        dir.join("..").join("..").join("bin").join("mpv").join("mpv.exe"),
+    ];
+    candidates
+        .iter()
+        .find(|p| p.exists())
+        .cloned()
+        .unwrap_or_else(|| std::path::PathBuf::from("mpv.exe"))
+}
+
+fn load_stream(port: u16, item: MediaItem, episode: u32) -> Task<Message> {
+    let fetch_item = item.clone();
+    Task::perform(
+        async move { api::stream(port, &fetch_item.id, episode, "sub").await },
+        move |result| {
+            let base = format!("http://127.0.0.1:{port}");
+            match result {
+                Ok(value) => {
+                    let source = value
+                        .get("sourceUrls")
+                        .and_then(|v| v.as_array())
+                        .and_then(|a| a.iter().find(|s| !s.get("isEmbed").and_then(|v| v.as_bool()).unwrap_or(false)))
+                        .cloned()
+                        .unwrap_or_default();
+
+                    let stream_url = source
+                        .get("streamUrl")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| format!("{base}{s}"))
+                        .or_else(|| {
+                            source
+                                .get("sourceUrl")
+                                .and_then(|v| v.as_str())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| format!("{base}/api/proxy?src={}", api::urlencode(s)))
+                        });
+
+                    let subtitles = value
+                        .get("subtitles")
+                        .and_then(|v| v.as_array())
+                        .map(|subs| {
+                            subs.iter()
+                                .filter_map(|s| s.get("url").and_then(|v| v.as_str()))
+                                .map(|url| format!("{base}{url}"))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+
+                    match stream_url {
+                        Some(stream_url) => Message::StreamReady {
+                            stream_url,
+                            subtitles,
+                        },
+                        None => Message::Error("No playable source for this episode".to_string()),
+                    }
+                }
+                Err(error) => Message::Error(error),
+            }
+        },
+    )
 }
 
 fn backend_subscription() -> Subscription<Message> {
@@ -274,7 +347,7 @@ impl App {
                 self.store.history.insert(
                     0,
                     HistoryEntry {
-                        item,
+                        item: item.clone(),
                         episode,
                         timestamp: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -284,7 +357,38 @@ impl App {
                 );
                 self.store.history.truncate(500);
                 self.store.save();
-                self.error = Some("Video playback is not wired up in the native build yet".to_string());
+                match self.port {
+                    Some(port) => load_stream(port, item, episode),
+                    None => {
+                        self.error = Some("Backend is still starting".to_string());
+                        Task::none()
+                    }
+                }
+            }
+            Message::StreamReady {
+                stream_url,
+                subtitles,
+            } => {
+                let mut command = std::process::Command::new(mpv_path());
+                command
+                    .arg("--no-config")
+                    .arg("--force-window=yes")
+                    .arg("--keep-open=yes")
+                    .arg("--hwdec=auto-safe")
+                    // Keep the player's memory bounded on long HLS streams.
+                    .arg("--cache=no")
+                    .arg("--demuxer-max-bytes=16MiB")
+                    .arg("--demuxer-readahead-secs=1");
+                for sub in &subtitles {
+                    command.arg(format!("--sub-file={sub}"));
+                }
+                command.arg(&stream_url);
+                match command.spawn() {
+                    Ok(_) => self.error = None,
+                    Err(error) => {
+                        self.error = Some(format!("Could not start mpv: {error}"))
+                    }
+                }
                 Task::none()
             }
             Message::AddWatchlist(item) => {

@@ -7,6 +7,8 @@ or JavaScript. It talks to the existing Axum backend as a sidecar over HTTP.
 
 ```bash
 npm run build:rust                        # builds rust-backend/target/release/riftwatch-backend.exe
+# Put the Windows portable mpv build in native-app/bin/mpv/mpv.exe (gitignored):
+#   https://github.com/shinchiro/mpv-winbuild-cmake/releases/latest  ->  mpv-x86_64-*.7z
 cargo build --release --manifest-path native-app/Cargo.toml
 ./native-app/target/release/riftwatch-native.exe
 ```
@@ -25,12 +27,15 @@ The app starts the backend with `PORT=0` and `RIFTWATCH_BIND=127.0.0.1`, reads
 
 ## Not implemented yet
 
-- **Video playback** — this is the blocker for a full replacement. `libmpv`
-  cannot be compiled here without the mpv C source (`MPV_SOURCE` env var), and
-  there is no pure-Rust HLS player. A native player needs a prebuilt libmpv DLL
-  (or mpv.exe) shipped as an external binary.
-- Movie/TV pages, subtitle rendering, skip intervals, notifications, and the
-  full visual design of the current Tauri app.
+- **Video playback** works by launching the bundled `mpv.exe` with a resolved
+  stream URL and subtitle files. mpv is an external binary (not pure Rust).
+- Movie/TV pages, skip intervals, notifications, and the full visual design of
+  the current Tauri app are not ported yet.
+
+Measured idle working set: native app + backend ≈ **180 MB** vs Tauri app +
+WebView2 processes ≈ **570 MB**. During HLS playback mpv adds roughly **260 MB**
+private memory, so playback is comparable to Tauri but startup and idle are much
+lighter.
 
 Until video playback is solved, the Tauri build remains the complete, shippable
 app (`npm run tauri:build`).
