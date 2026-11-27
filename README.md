@@ -49,25 +49,6 @@ static export inside a Tauri v2 app; there is no web deployment.
 winget install OpenJS.NodeJS.LTS
 ```
 
-## Development
-
-```bash
-npm run dev         # build the sidecar, then launch the Tauri dev window
-npm run check       # lint + typecheck in parallel
-npm run build:rust  # release build of the Rust backend
-npm run tauri:build # build the installer (MSI + NSIS)
-```
-
-`npm run dev` opens a native window against the Next dev server
-(`http://localhost:3000`) so hot reload works while developing. The production
-build uses a `riftwatch://` custom protocol over the bundled static export.
-
-`npm run tauri:build` produces the installers under
-`src-tauri/target/release/bundle/`. On Windows with the GNU Rust toolchain and a
-checkout path containing spaces, the script redirects Cargo to
-`C:\riftwatch-target\app` so `windres` can handle the path; the installers are
-then under `C:\riftwatch-target\app\release\bundle\`.
-
 ## How it works
 
 - The Rust backend starts as a sidecar with `PORT=0`; the OS picks a free port
