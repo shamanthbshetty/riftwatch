@@ -43,6 +43,8 @@ interface VideoPlayerProps {
   skipIntro?: { start: number; end: number } | null;
   skipOutro?: { start: number; end: number } | null;
   autoSkip?: boolean;
+  /** Dub sources often carry English subs; start with captions off. */
+  subtitlesDefaultOff?: boolean;
 }
 
 interface LevelInfo {
@@ -109,6 +111,7 @@ export default function VideoPlayer({
   skipIntro,
   skipOutro,
   autoSkip,
+  subtitlesDefaultOff,
   storageKey,
   nextLabel,
   onNext,
@@ -171,7 +174,9 @@ export default function VideoPlayer({
   const [levelPicked, setLevelPicked] = useState(-1); // -1 = auto
   const [activeLevel, setActiveLevel] = useState(-1);
   const [speed, setSpeed] = useState(1);
-  const [captionChoice, setCaptionChoice] = useState<number | null>(null);
+  const [captionChoice, setCaptionChoice] = useState<number | null>(
+    subtitlesDefaultOff ? -1 : null,
+  );
   const [cueText, setCueText] = useState<string | null>(null);
   // Subtitle sync correction in seconds (positive = subs later). Fine-tuned
   // from the settings panel; sources occasionally ship VTTs offset from the

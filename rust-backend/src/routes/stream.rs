@@ -273,6 +273,15 @@ fn push_source(r: &Value, wants_dub: bool, seen: &mut HashSet<String>, out: &mut
     out.push(Value::Object(obj));
 }
 
+fn source_media_key(r: &Value) -> String {
+    r["streamUrl"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| r["embedUrl"].as_str().filter(|s| !s.is_empty()))
+        .unwrap_or("")
+        .to_string()
+}
+
 async fn resolve_sources(
     state: &AppState,
     id: &str,
@@ -320,18 +329,59 @@ async fn resolve_sources(
     let mut sources: Vec<Value> = Vec::new();
     let wants_dub = mode == "dub";
 
+    // Some providers label a URL "/dub" but serve the exact same media file as
+    // the sub URL (e.g. Overgeared ep 9 on Anikoto). Resolve the sub variants
+    // too and drop any "dub" source whose media URL is identical — otherwise
+    // the player silently plays Japanese under a DUB selection.
+    let sub_media: HashSet<String> = if wants_dub {
+        let sub_anikoto = with_provider_timeout(
+            get_anikoto_embeds(&state.http, &show_name, ep, "sub"),
+            "anikoto",
+            Vec::new(),
+        );
+        let sub_aniwatch = with_provider_timeout(
+            get_aniwatch_embed(&state.http, &show_name, ep, "sub"),
+            "aniwatch",
+            None,
+        );
+        let (sub_anikoto, sub_aniwatch) = tokio::join!(sub_anikoto, sub_aniwatch);
+        sub_anikoto
+            .iter()
+            .chain(sub_aniwatch.iter())
+            .map(source_media_key)
+            .filter(|key| !key.is_empty())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    // Sources whose "dub" URL points at the exact same media as the sub URL
+    // are kept only as a last resort — prefer a provider with a real dub.
+    let mut seen_mislabeled: HashSet<String> = HashSet::new();
+    let mut mislabeled: Vec<Value> = Vec::new();
+
     // Anikoto first (user preference — its extracted "Vidstream-1" HLS carries
     // the most subtitle tracks and skip windows), Aniwatch second as failover.
     for k in &anikoto {
-        push_source(k, wants_dub, &mut seen_media, &mut sources);
+        let key = source_media_key(k);
+        if wants_dub && sub_media.contains(&key) {
+            push_source(k, wants_dub, &mut seen_mislabeled, &mut mislabeled);
+        } else {
+            push_source(k, wants_dub, &mut seen_media, &mut sources);
+        }
     }
-    // Then Kenjitsu (Anizone, Animeheaven) — sub-only, so dub requests skip these
     if let Some(a) = &aniwatch {
-        push_source(a, wants_dub, &mut seen_media, &mut sources);
+        let key = source_media_key(a);
+        if wants_dub && sub_media.contains(&key) {
+            push_source(a, wants_dub, &mut seen_mislabeled, &mut mislabeled);
+        } else {
+            push_source(a, wants_dub, &mut seen_media, &mut sources);
+        }
     }
     for k in &kenjitsu {
         push_source(k, wants_dub, &mut seen_media, &mut sources);
     }
+    sources.extend(mislabeled);
 
     if sources.is_empty() {
         let msg = if wants_dub {

@@ -47,6 +47,19 @@ const EMPTY_SOURCES: Source[] = [];
 const EMPTY_SUBTITLES: NonNullable<Source["subtitles"]> = [];
 const EMPTY_TITLES: Record<string, string> = {};
 const TITLES_CACHE_PREFIX = "rw:titles:";
+const SOURCE_PREF_KEY = "rw:source-pref";
+
+/** Remember the provider the user picked so it survives episode/show changes. */
+function preferredSourceIndex(sources: Source[]): number {
+  try {
+    const name = localStorage.getItem(SOURCE_PREF_KEY);
+    if (!name) return 0;
+    const index = sources.findIndex((s) => s.sourceName === name);
+    return index >= 0 ? index : 0;
+  } catch {
+    return 0;
+  }
+}
 
 // Episode names come from a separate upstream lookup. Keep them next to the
 // cached show info so repeat visits can render names instantly, before the
@@ -280,7 +293,12 @@ function WatchContent() {
           setStream({ key: streamKey, sources: EMPTY_SOURCES, selection: 0, loadError: "No playable sources returned" });
           return;
         }
-        setStream({ key: streamKey, sources: data.sourceUrls, selection: 0, loadError: "" });
+        setStream({
+          key: streamKey,
+          sources: data.sourceUrls,
+          selection: preferredSourceIndex(data.sourceUrls),
+          loadError: "",
+        });
       })
       .catch((e) => {
         if (!cancelled) setStream({ key: streamKey, sources: EMPTY_SOURCES, selection: 0, loadError: String(e) });
@@ -367,6 +385,9 @@ function WatchContent() {
 
   function selectSource(index: number) {
     const name = sources[index]?.sourceName;
+    if (name) {
+      try { localStorage.setItem(SOURCE_PREF_KEY, name); } catch { /* ignore */ }
+    }
     setStream((prev) => (prev && prev.key === streamKey ? { ...prev, selection: index } : prev));
     setFailedKey(null);
     if (index !== selectedSource && name) toast(`Playing from ${name}`);
@@ -717,6 +738,7 @@ function WatchContent() {
                 skipIntro={sources[selectedSource]?.intro ?? skip?.intro ?? null}
                 skipOutro={sources[selectedSource]?.outro ?? skip?.outro ?? null}
                 autoSkip={autoSkipOn}
+                subtitlesDefaultOff={mode === "dub"}
               />
             )
           )
