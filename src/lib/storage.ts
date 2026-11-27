@@ -1,3 +1,12 @@
+import { posterUrl } from "./movies";
+
+// History rows have been written with both raw TMDB paths and full URLs.
+function normalizePoster(poster: string): string {
+  if (!poster) return "";
+  if (poster.startsWith("http://") || poster.startsWith("https://")) return poster;
+  return posterUrl(poster) ?? "";
+}
+
 // Watchlist status. Optional on stored items — entries saved before this
 // existed read as "watching", so no migration step is needed.
 export type WatchStatus = "watching" | "completed" | "on-hold" | "planned";
@@ -709,11 +718,14 @@ export function addToMovieHistory(item: Omit<MovieHistoryItem, "timestamp">) {
 export function getContinueWatchingMovies(): MovieHistoryItem[] {
   const hist = getMovieHistory();
   const seen = new Set<string>();
-  return hist.filter((h) => {
-    if (seen.has(h.id)) return false;
-    seen.add(h.id);
-    return true;
-  }).slice(0, 12);
+  return hist
+    .map((h) => ({ ...h, poster: normalizePoster(h.poster) }))
+    .filter((h) => {
+      if (seen.has(h.id)) return false;
+      seen.add(h.id);
+      return true;
+    })
+    .slice(0, 12);
 }
 
 export const getContinueWatchingMoviesSnapshot = (): MovieHistoryItem[] =>
@@ -756,7 +768,7 @@ export function markSeasonWatched(
     .map((ep, index) => ({
       id,
       title,
-      poster,
+      poster: normalizePoster(poster),
       type: "tv" as const,
       season,
       episode: ep,

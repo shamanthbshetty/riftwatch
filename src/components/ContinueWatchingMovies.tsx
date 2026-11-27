@@ -10,7 +10,7 @@ import { useToast } from "@/lib/toast";
 import Rail from "./Rail";
 import SectionHeader from "./SectionHeader";
 
-function ContinueMovieCard({ item, onRemove }: { item: MovieHistoryItem; onRemove: (id: string, season?: number, episode?: number) => void }) {
+function ContinueMovieCard({ item, onRemove }: { item: MovieHistoryItem; onRemove: (id: string) => void }) {
   const resume = useMovieResume(item.id);
   const matches = resume
     && resume.type === item.type
@@ -61,7 +61,7 @@ function ContinueMovieCard({ item, onRemove }: { item: MovieHistoryItem; onRemov
         {item.title}
       </p>
       <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(item.id, item.season, item.episode); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(item.id); }}
         aria-label="Remove from continue watching"
         className="absolute right-1.5 top-1.5 z-30 flex h-7 w-7 items-center justify-center rounded-full border border-white/25 bg-black/60 text-white/80 opacity-0 transition-[opacity,color,border-color] hover:border-red-400/60 hover:text-red-400 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
       >
@@ -75,8 +75,9 @@ export default function ContinueWatchingMovies() {
   const items = useContinueWatchingMovies();
   const { toast } = useToast();
 
-  const remove = useCallback((id: string, season?: number, episode?: number) => {
-    removeFromMovieHistory(id, season, episode);
+  const remove = useCallback((id: string) => {
+    // Remove every episode of the show, or the next episode just surfaces.
+    removeFromMovieHistory(id);
     toast("Removed from history");
   }, [toast]);
 

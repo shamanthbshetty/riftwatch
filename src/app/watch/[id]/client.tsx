@@ -559,7 +559,7 @@ function WatchContent() {
 
   const downloadEpisode = useCallback(async () => {
     if (!streamUrl || !streamUrl.includes("mp4-proxy")) {
-      toast("Only direct MP4 sources can be saved offline");
+      toast("This source can't be saved offline");
       return;
     }
     try {
@@ -706,6 +706,7 @@ function WatchContent() {
                 onEnded={autoPlay && hasNextEp ? goNext : undefined}
                 onNext={hasNextEp ? goNext : undefined}
                 onPrevious={Number(ep) > 1 ? goPrev : undefined}
+                onDownload={() => void downloadEpisode()}
                 autoAdvance={autoPlay}
                 nextTitle={epTitles[String(currentEp + 1)] ? `EP ${currentEp + 1} — ${epTitles[String(currentEp + 1)]}` : undefined}
                 onError={handleSourceError}
@@ -719,16 +720,6 @@ function WatchContent() {
             )
           )
         )}
-      </div>
-
-      <div className="flex items-center gap-2 mt-2">
-        <button
-          onClick={() => void downloadEpisode()}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-surface hover:bg-surface-hover text-text-muted border border-border transition-colors btn-tap"
-        >
-          Save offline
-        </button>
-        <span className="text-xs text-text-secondary">Direct MP4 sources only</span>
       </div>
 
       {/* Source selector */}

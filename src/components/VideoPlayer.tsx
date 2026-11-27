@@ -5,6 +5,7 @@ import { getResumePos, saveResumePos } from "@/lib/storage";
 import { useResumePref } from "@/lib/useWatchlists";
 import {
   Captions,
+  Download,
   Maximize,
   Minimize,
   Pause,
@@ -35,6 +36,8 @@ interface VideoPlayerProps {
   onNext?: () => void;
   /** Go back to the previous episode (N/P keyboard shortcuts). */
   onPrevious?: () => void;
+  /** Save the current source offline (shown as a download icon in controls). */
+  onDownload?: () => void;
   /** Whether `onEnded` auto-advances (drives the countdown on the up-next card). */
   autoAdvance?: boolean;
   skipIntro?: { start: number; end: number } | null;
@@ -110,6 +113,7 @@ export default function VideoPlayer({
   nextLabel,
   onNext,
   onPrevious,
+  onDownload,
   nextTitle,
   autoAdvance = false,
 }: VideoPlayerProps) {
@@ -1294,6 +1298,11 @@ export default function VideoPlayer({
           {pipAvailable && (
             <button onClick={() => void togglePip()} className="rounded p-1.5 transition hover:bg-white/10" aria-label="Picture in picture">
               {Icon.pip}
+            </button>
+          )}
+          {onDownload && (
+            <button onClick={onDownload} className="rounded p-1.5 transition hover:bg-white/10" aria-label="Download episode" title="Save offline">
+              <Download className="h-5 w-5" aria-hidden />
             </button>
           )}
           <button onClick={() => void toggleFullscreen()} className="rounded p-1.5 transition hover:bg-white/10" aria-label="Fullscreen">
