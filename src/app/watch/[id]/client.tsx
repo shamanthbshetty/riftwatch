@@ -558,13 +558,14 @@ function WatchContent() {
   }, [ep, mode, goTo]);
 
   const downloadEpisode = useCallback(async () => {
-    if (!streamUrl || !streamUrl.includes("mp4-proxy")) {
+    if (!streamUrl || !(streamUrl.includes("m3u8") || streamUrl.includes("mp4-proxy"))) {
       toast("This source can't be saved offline");
       return;
     }
     try {
       const filename = `${id}-ep${ep}-${mode}.mp4`;
-      const path = await invoke<string>("download_offline", { url: streamUrl, filename });
+      const command = streamUrl.includes("m3u8") ? "download_hls" : "download_offline";
+      const path = await invoke<string>(command, { url: streamUrl, filename });
       const list: unknown[] = JSON.parse(localStorage.getItem("offline-downloads") || "[]");
       list.unshift({ id, ep, mode, path, title: showInfo?.name || titleParam_url || "", timestamp: Date.now() });
       localStorage.setItem("offline-downloads", JSON.stringify(list.slice(0, 100)));

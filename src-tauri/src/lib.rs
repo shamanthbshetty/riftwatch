@@ -265,26 +265,38 @@ fn save_window_state(app: &AppHandle) {
     }
 }
 
-/// Save a direct media stream to the per-user downloads folder. HLS streams
-/// are playlists plus many segments, so only single-file MP4 sources are
-/// supported here.
-#[tauri::command]
-async fn download_offline(app: AppHandle, url: String, filename: String) -> Result<String, String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    let name: String = filename
+fn safe_download_name(filename: &str) -> String {
+    filename
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
-        .collect();
+        .collect()
+}
+
+fn downloads_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
         .map_err(|e| e.to_string())?
         .join("downloads");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(name);
+    Ok(dir)
+}
 
+fn absolute_url(base: &str, reference: &str) -> Result<String, String> {
+    let parsed = reqwest::Url::parse(base).map_err(|e| e.to_string())?;
+    parsed
+        .join(reference)
+        .map(|url| url.to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// Save a direct media stream (MP4) to the per-user downloads folder.
+#[tauri::command]
+async fn download_offline(app: AppHandle, url: String, filename: String) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let path = downloads_dir(&app)?.join(safe_download_name(&filename));
     let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("download failed: {}", response.status()));
@@ -297,6 +309,115 @@ async fn download_offline(app: AppHandle, url: String, filename: String) -> Resu
     }
     file.flush().await.map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Download an HLS stream without any external tools: pick the best variant,
+/// fetch every segment next to a rewritten local playlist. Encrypted streams
+/// are rejected rather than producing a broken offline copy.
+#[tauri::command]
+async fn download_hls(app: AppHandle, url: String, filename: String) -> Result<String, String> {
+    let safe = safe_download_name(&filename);
+    let base = safe.strip_suffix(".mp4").unwrap_or(&safe).to_string();
+    let root = downloads_dir(&app)?;
+    let segment_dir = root.join(&base);
+    std::fs::create_dir_all(&segment_dir).map_err(|e| e.to_string())?;
+    let playlist_path = root.join(format!("{base}.m3u8"));
+
+    let master = reqwest::get(&url)
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    if master.contains("#EXT-X-KEY") {
+        return Err("encrypted HLS streams are not supported".to_string());
+    }
+
+    // Master playlist → choose the highest-bandwidth variant.
+    let media_url = if master.contains("#EXT-X-STREAM-INF") {
+        let mut best: Option<(u64, String)> = None;
+        let mut bandwidth = 0u64;
+        for line in master.lines() {
+            let line = line.trim();
+            if let Some(info) = line.strip_prefix("#EXT-X-STREAM-INF:") {
+                bandwidth = info
+                    .split(',')
+                    .find_map(|part| part.trim().strip_prefix("BANDWIDTH="))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+            } else if !line.is_empty() && !line.starts_with('#') {
+                let candidate = (bandwidth, line.to_string());
+                if best.as_ref().is_none_or(|b| candidate.0 > b.0) {
+                    best = Some(candidate);
+                }
+            }
+        }
+        match best {
+            Some((_, variant)) => absolute_url(&url, &variant)?,
+            None => return Err("no playable variant in playlist".to_string()),
+        }
+    } else {
+        url.clone()
+    };
+
+    let playlist = if media_url == url {
+        master
+    } else {
+        reqwest::get(&media_url)
+            .await
+            .map_err(|e| e.to_string())?
+            .text()
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    if playlist.contains("#EXT-X-KEY") {
+        return Err("encrypted HLS streams are not supported".to_string());
+    }
+
+    let mut local = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
+    let mut index = 0usize;
+    let mut last_info = String::new();
+    for line in playlist.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("#EXTINF:") {
+            last_info = trimmed.to_string();
+        } else if trimmed.starts_with("#EXT-X-TARGETDURATION")
+            || trimmed.starts_with("#EXT-X-MEDIA-SEQUENCE")
+            || trimmed.starts_with("#EXT-X-PLAYLIST-TYPE")
+        {
+            local.push_str(trimmed);
+            local.push('\n');
+        } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            let segment_url = absolute_url(&media_url, trimmed)?;
+            let bytes = reqwest::get(&segment_url)
+                .await
+                .map_err(|e| e.to_string())?
+                .bytes()
+                .await
+                .map_err(|e| e.to_string())?;
+            let name = format!("seg_{index:05}.ts");
+            std::fs::write(segment_dir.join(&name), bytes).map_err(|e| e.to_string())?;
+            if !last_info.is_empty() {
+                local.push_str(&last_info);
+                local.push('\n');
+                last_info.clear();
+            }
+            local.push_str(&name);
+            local.push('\n');
+            index += 1;
+        }
+    }
+    if index == 0 {
+        return Err("playlist contained no segments".to_string());
+    }
+    local.push_str("#EXT-X-ENDLIST\n");
+    std::fs::write(&playlist_path, local).map_err(|e| e.to_string())?;
+    Ok(playlist_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    open::that(&url).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -359,7 +480,9 @@ pub fn run() {
             get_backend_port,
             save_auto_backup,
             reset_window,
-            download_offline
+            open_external,
+            download_offline,
+            download_hls
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

@@ -3,6 +3,28 @@
 Watch anime, movies & TV shows. **Desktop-only** — the frontend ships as a
 static export inside a Tauri v2 app; there is no web deployment.
 
+## Screenshots
+
+**Home — anime**
+
+![RiftWatch home showing featured anime and continue watching](docs/screenshots/home-anime.png)
+
+**Home — movies & TV**
+
+![RiftWatch movies tab](docs/screenshots/home-movies.png)
+
+**Player with subtitles and episode list**
+
+![RiftWatch video player](docs/screenshots/watch-player.png)
+
+**Movie details**
+
+![RiftWatch movie details](docs/screenshots/movie-detail.png)
+
+**Settings**
+
+![RiftWatch settings](docs/screenshots/settings.png)
+
 ## Features
 
 - Anime and movie/TV discovery, search with filters (genre, year, score, status, dub),
@@ -13,8 +35,9 @@ static export inside a Tauri v2 app; there is no web deployment.
 - Settings → **What's New** shows the latest GitHub release notes; auto-updates are signed.
 - Rolling local backups (newest 5) plus manual Export/Import in Settings.
 - Remembers window size/position, with a **Reset window** button in Settings.
-- "Save offline" stores direct MP4 streams under `%APPDATA%\com.riftwatch.app\downloads`.
-  HLS streams are playlists plus many segments and are not supported for offline saving.
+- "Save offline" stores media under `%APPDATA%\com.riftwatch.app\downloads`: direct
+  MP4s as a single file, HLS streams as a local playlist plus its segments
+  (downloaded in Rust, no ffmpeg needed). Encrypted streams are not supported.
 
 ## Prerequisites
 
