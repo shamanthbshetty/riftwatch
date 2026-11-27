@@ -7,6 +7,7 @@
     "dev:next": "next dev",
     "build:rust": "cargo build --release --manifest-path rust-backend/Cargo.toml",
     "build:tauri": "next build",
+    "tauri": "tauri",
     "tauri:build": "node scripts/tauri-run.mjs build",
     "clean:rust": "node scripts/clean-rust.mjs",
     "lint": "eslint",
