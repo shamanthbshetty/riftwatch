@@ -915,6 +915,10 @@ export default function VideoPlayer({
         ref={videoRef}
         className="h-full w-full object-contain"
         playsInline
+        // Subtitle <track> files come from the sidecar on a different origin
+        // than the webview. Without an explicit CORS mode Chromium refuses to
+        // load them ("Unsafe attempt to load URL ...").
+        crossOrigin="anonymous"
         preload="auto"
         onClick={handleSurfaceClick}
         onDoubleClick={() => void toggleFullscreen()}

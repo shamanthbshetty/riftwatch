@@ -10,7 +10,7 @@ import IframePlayer from "@/components/IframePlayer";
 import SubDubToggle from "@/components/SubDubToggle";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
 
-import { addToHistory, getLastWatched, getWatchlist, addToWatchlist, removeFromWatchlist, setWatchlistStatus, setAutoplayPref, setSkipPref, type WatchStatus } from "@/lib/storage";
+import { addToHistory, getLastWatched, getWatchlist, addToWatchlist, removeFromWatchlist, setWatchlistStatus, setAutoplayPref, setSkipPref, setShowCache, setTitlesCache, type WatchStatus } from "@/lib/storage";
 import { sameShow } from "@/lib/show-id";
 import { showRefMatches } from "@/lib/show-match";
 import { useWatchlistItems, useAllHistory, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
@@ -382,7 +382,7 @@ function WatchContent() {
           .then((r) => r.json())
           .then((t: Record<string, string>) => {
             if (cancelled) return;
-            try { localStorage.setItem(`${TITLES_CACHE_PREFIX}${showId}`, JSON.stringify(t)); } catch { /* ignore */ }
+            setTitlesCache(showId, t);
             setEpisodesState((prev) => (prev && prev.id === showId ? { ...prev, titles: t } : prev));
           })
           .catch(() => {});
@@ -430,7 +430,7 @@ function WatchContent() {
                     };
                     if (!cancelled) {
                       setEpisodesState({ id, titles: cachedEpTitles, showInfo: info, epError: "" });
-                      try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* ignore */ }
+                      setShowCache(id, info);
                       refreshTitles(id, info.malId, info.englishName || info.name);
                     }
                     return;
@@ -479,7 +479,7 @@ function WatchContent() {
           allDubEps,
         };
         setEpisodesState({ id, titles: cachedEpTitles, showInfo: info, epError: "" });
-        try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* ignore */ }
+        setShowCache(id, info);
         refreshTitles(id, d.malId, d.englishName || d.name);
       } catch {
         if (!cancelled && attempt < 2) setTimeout(() => loadEpisodes(attempt + 1), 800);

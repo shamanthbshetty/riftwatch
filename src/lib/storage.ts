@@ -75,6 +75,56 @@ function set(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota exceeded */ }
 }
 
+// Per-show metadata/title caches can get large (one show with 1000+ episode
+// names is ~100 KB). Keep a bounded, most-recently-used set so a heavy user
+// can't fill the webview's localStorage quota over time.
+const CACHE_INDEX_KEY = "rw:cache-index";
+const SHOW_CACHE_LIMIT = 25;
+
+function pruneShowCaches(): void {
+  if (typeof window === "undefined") return;
+  try {
+    let index: Record<string, number> = {};
+    try { index = JSON.parse(localStorage.getItem(CACHE_INDEX_KEY) || "{}") || {}; } catch { /* ignore */ }
+    const ids = Object.keys(index).sort((a, b) => index[b] - index[a]);
+    let changed = false;
+    for (const id of ids.slice(SHOW_CACHE_LIMIT)) {
+      localStorage.removeItem(`rw:show:${id}`);
+      localStorage.removeItem(`rw:titles:${id}`);
+      delete index[id];
+      changed = true;
+    }
+    if (changed) localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(index));
+  } catch { /* quota exceeded */ }
+}
+
+/** Write a show-info cache entry, evicting the least recently used shows. */
+export function setShowCache(id: string, info: unknown): void {
+  try {
+    let index: Record<string, number> = {};
+    try { index = JSON.parse(localStorage.getItem(CACHE_INDEX_KEY) || "{}") || {}; } catch { /* ignore */ }
+    index[id] = Date.now();
+    localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(index));
+  } catch { /* ignore */ }
+  pruneShowCaches();
+  try { localStorage.setItem(`rw:show:${id}`, JSON.stringify(info)); } catch { /* quota exceeded */ }
+}
+
+/** Write an episode-title cache entry, evicting the least recently used shows. */
+export function setTitlesCache(id: string, titles: Record<string, string>): void {
+  try {
+    let index: Record<string, number> = {};
+    try { index = JSON.parse(localStorage.getItem(CACHE_INDEX_KEY) || "{}") || {}; } catch { /* ignore */ }
+    index[id] = Date.now();
+    localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(index));
+  } catch { /* ignore */ }
+  pruneShowCaches();
+  try { localStorage.setItem(`rw:titles:${id}`, JSON.stringify(titles)); } catch { /* quota exceeded */ }
+}
+
+// Clean up caches written by older versions on first load.
+if (typeof window !== "undefined") pruneShowCaches();
+
 // ponytail: external-store plumbing. Components read localStorage through
 // useSyncExternalStore (see useWatchlists.ts) so a write in one place re-renders
 // every other mounted view instead of leaving them stale until their own reload.
