@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
 import AnimeCard from "@/components/AnimeCard";
@@ -23,6 +23,10 @@ const EMPTY_MOVIES: MovieResult[] = [];
 
 const PAGE = "mx-auto w-full page-gutter";
 const GRID = "grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5";
+const GENRES: Record<number, string> = {
+  28: "Action", 12: "Adventure", 35: "Comedy", 18: "Drama", 27: "Horror",
+  10749: "Romance", 878: "Sci-Fi", 16: "Animation", 53: "Thriller", 99: "Documentary",
+};
 
 function HomeContent() {
   const searchParams = useSearchParams();
@@ -35,11 +39,44 @@ function HomeContent() {
   // effect has to synchronously clear state.
   const [anime, setAnime] = useState<{ q: string; results: SearchResult[] } | null>(null);
   const [movie, setMovie] = useState<{ q: string; results: MovieResult[] } | null>(null);
+  const [filters, setFilters] = useState({
+    genre: 0,
+    year: "all",
+    minScore: 0,
+    status: "all",
+    dubOnly: false,
+  });
 
   const animeResults = anime?.q === q ? anime.results : EMPTY_ANIME;
   const movieResults = movie?.q === q ? movie.results : EMPTY_MOVIES;
   const animeLoading = Boolean(q) && anime?.q !== q;
   const movieLoading = Boolean(q) && movie?.q !== q;
+
+  const shownAnime = useMemo(
+    () => animeResults.filter((item) => {
+      if (filters.status !== "all" && item.status !== filters.status) return false;
+      if (filters.dubOnly && !(item.availableEpisodes?.dub > 0)) return false;
+      return true;
+    }),
+    [animeResults, filters.status, filters.dubOnly],
+  );
+  const shownMovies = useMemo(
+    () => movieResults.filter((item) => {
+      if (filters.genre && !(item.genre_ids ?? []).includes(filters.genre)) return false;
+      if (filters.minScore && (item.vote_average ?? 0) < filters.minScore) return false;
+      if (filters.year !== "all" && !(item.release_date ?? item.first_air_date ?? "").startsWith(filters.year)) return false;
+      return true;
+    }),
+    [movieResults, filters.genre, filters.minScore, filters.year],
+  );
+  const availableYears = useMemo(() => {
+    const years = new Set(
+      movieResults
+        .map((item) => (item.release_date ?? item.first_air_date ?? "").slice(0, 4))
+        .filter((year) => /^\d{4}$/.test(year)),
+    );
+    return [...years].sort().reverse().slice(0, 12);
+  }, [movieResults]);
 
   useEffect(() => {
     if (!q) return;
@@ -61,6 +98,44 @@ function HomeContent() {
   }, [q, isMovies]);
 
   if (q) {
+    const selectClass = "rounded-lg bg-surface border border-border px-2 py-1.5 text-xs text-text-muted";
+    const filterBar = (
+      <div className="flex flex-wrap items-center gap-2">
+        {isMovies ? (
+          <>
+            <select className={selectClass} value={filters.genre} onChange={(e) => setFilters({ ...filters, genre: Number(e.target.value) })}>
+              <option value={0}>All genres</option>
+              {Object.entries(GENRES).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+            <select className={selectClass} value={filters.year} onChange={(e) => setFilters({ ...filters, year: e.target.value })}>
+              <option value="all">All years</option>
+              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+            <select className={selectClass} value={filters.minScore} onChange={(e) => setFilters({ ...filters, minScore: Number(e.target.value) })}>
+              <option value={0}>Any score</option>
+              <option value={7}>7+</option>
+              <option value={8}>8+</option>
+            </select>
+          </>
+        ) : (
+          <>
+            <select className={selectClass} value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+              <option value="all">Any status</option>
+              <option value="RELEASING">Releasing</option>
+              <option value="FINISHED">Finished</option>
+              <option value="NOT_YET_RELEASED">Upcoming</option>
+            </select>
+            <label className="flex items-center gap-1.5 text-xs text-text-muted">
+              <input type="checkbox" checked={filters.dubOnly} onChange={(e) => setFilters({ ...filters, dubOnly: e.target.checked })} />
+              Dub available
+            </label>
+          </>
+        )}
+        <span className="text-xs text-text-secondary">
+          {isMovies ? shownMovies.length : shownAnime.length} shown
+        </span>
+      </div>
+    );
     if (isMovies) {
       return (
         <div className={`${PAGE} page-top space-y-5 pb-10`}>
@@ -68,6 +143,7 @@ function HomeContent() {
             {movieLoading ? "Searching…" : `Results for “${q}”`}
             {!movieLoading && <span className="ml-2 text-sm font-normal text-text-secondary">{movieResults.length} titles</span>}
           </h1>
+          {!movieLoading && filterBar}
           {movieLoading && <CardGridSkeleton />}
           {!movieLoading && movieResults.length === 0 && (
             <EmptyState
@@ -76,9 +152,9 @@ function HomeContent() {
               description="Try a different spelling, or search for the original Japanese title."
             />
           )}
-          {!movieLoading && movieResults.length > 0 && (
+          {!movieLoading && shownMovies.length > 0 && (
             <div className={GRID}>
-              {movieResults.map((m) => (
+              {shownMovies.map((m) => (
                 <MovieCard key={m.id} movie={m} />
               ))}
             </div>
@@ -93,6 +169,7 @@ function HomeContent() {
           {animeLoading ? "Searching…" : `Results for “${q}”`}
           {!animeLoading && <span className="ml-2 text-sm font-normal text-text-secondary">{animeResults.length} titles</span>}
         </h1>
+        {!animeLoading && filterBar}
         {animeLoading && <CardGridSkeleton />}
         {!animeLoading && animeResults.length === 0 && (
           <EmptyState
@@ -101,9 +178,9 @@ function HomeContent() {
             description="Try a different spelling, or search for the original Japanese title."
           />
         )}
-        {!animeLoading && animeResults.length > 0 && (
+        {!animeLoading && shownAnime.length > 0 && (
           <div className={GRID}>
-            {animeResults.map((r) => (
+            {shownAnime.map((r) => (
               <AnimeCard
                 key={r._id}
                 id={r._id}

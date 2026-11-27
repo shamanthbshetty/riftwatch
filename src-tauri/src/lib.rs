@@ -1,7 +1,11 @@
 use std::sync::Mutex;
 use tauri::http::{header, Response, StatusCode};
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, RunEvent, Size,
+    WindowEvent,
+};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -201,18 +205,162 @@ fn get_backend_port(state: tauri::State<BackendPort>) -> Option<u16> {
     *state.0.lock().unwrap()
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedWindow {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("window-state.json"))
+}
+
+fn restore_window_state(app: &AppHandle) {
+    let Ok(bytes) = std::fs::read(window_state_path(app).unwrap_or_default()) else {
+        return;
+    };
+    let Ok(saved) = serde_json::from_slice::<SavedWindow>(&bytes) else {
+        return;
+    };
+    if let Some(window) = app.get_webview_window("main") {
+        // We saved outer pixels; convert back to logical coordinates so DPI
+        // scaling cannot inflate the window on restore.
+        let _ = window.set_position(Position::Physical(PhysicalPosition {
+            x: saved.x as i32,
+            y: saved.y as i32,
+        }));
+        // `saved.width/height` are the logical *inner* size; set_size uses
+        // inner dimensions too, so the window frame is added exactly once.
+        let _ = window.set_size(Size::Logical(LogicalSize {
+            width: saved.width,
+            height: saved.height,
+        }));
+    }
+}
+
+fn save_window_state(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.inner_size()) else {
+        return;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let saved = SavedWindow {
+        x: position.x as f64,
+        y: position.y as f64,
+        width: size.width as f64 / scale,
+        height: size.height as f64 / scale,
+    };
+    if let Ok(bytes) = serde_json::to_vec(&saved) {
+        if let Ok(path) = window_state_path(app) {
+            let _ = std::fs::write(path, bytes);
+        }
+    }
+}
+
+/// Save a direct media stream to the per-user downloads folder. HLS streams
+/// are playlists plus many segments, so only single-file MP4 sources are
+/// supported here.
+#[tauri::command]
+async fn download_offline(app: AppHandle, url: String, filename: String) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let name: String = filename
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect();
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(name);
+
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("download failed: {}", response.status()));
+    }
+    let mut file = tokio::fs::File::create(&path).await.map_err(|e| e.to_string())?;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn reset_window(app: AppHandle) -> Result<(), String> {
+    let _ = std::fs::remove_file(window_state_path(&app)?);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_size(Size::Logical(LogicalSize {
+            width: 1180.0,
+            height: 700.0,
+        }));
+        let _ = window.center();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+/// Periodic snapshot of the webview's localStorage export. Keeps the newest
+/// five so a bad import or a crash never destroys the only copy.
+#[tauri::command]
+fn save_auto_backup(app: AppHandle, contents: String) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    std::fs::write(dir.join(format!("auto-{stamp}.json")), contents)
+        .map_err(|e| e.to_string())?;
+
+    let mut snapshots: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("auto-") && n.ends_with(".json")))
+        .collect();
+    snapshots.sort();
+    while snapshots.len() > 5 {
+        let _ = std::fs::remove_file(snapshots.remove(0));
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .register_uri_scheme_protocol("riftwatch", |ctx, request| {
             handle_asset_request(ctx.app_handle(), &request)
         })
         .manage(BackendChild(Mutex::new(None)))
         .manage(BackendPort(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![get_backend_port])
+        .invoke_handler(tauri::generate_handler![
+            get_backend_port,
+            save_auto_backup,
+            reset_window,
+            download_offline
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -222,12 +370,40 @@ pub fn run() {
                 )?;
             }
 
-            // Always open fully on-screen and focused. Windows can restore a
-            // stale position from a previous session, which sometimes puts the
-            // window behind the taskbar or below the visible screen area.
-            if let Some(window) = app.get_webview_window("main") {
+            // Restore the last window placement if we have one; otherwise
+            // center it so it can never open behind the taskbar / off-screen.
+            let has_saved_window = window_state_path(app.handle())
+                .map(|p| p.exists())
+                .unwrap_or(false);
+            if has_saved_window {
+                restore_window_state(app.handle());
+            } else if let Some(window) = app.get_webview_window("main") {
                 let _ = window.center();
+            }
+            if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
+            }
+
+            // System media keys. The frontend turns these events into the same
+            // actions as the player's keyboard shortcuts.
+            let shortcut_handle = app.handle().clone();
+            for (shortcut, event) in [
+                ("MediaPlayPause", "rw-media-play-pause"),
+                ("MediaNextTrack", "rw-media-next"),
+                ("MediaPrevTrack", "rw-media-prev"),
+            ] {
+                let handle = shortcut_handle.clone();
+                let name = event.to_string();
+                if let Err(error) =
+                    app.global_shortcut()
+                        .on_shortcut(shortcut, move |_app, _shortcut, state| {
+                            if state.state == ShortcutState::Pressed {
+                                let _ = handle.emit(&name, ());
+                            }
+                        })
+                {
+                    log::debug!("could not register media shortcut {shortcut}: {error}");
+                }
             }
 
             let child = spawn_backend(app.handle())?;
@@ -300,8 +476,17 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|handle, event| {
-        if let RunEvent::Exit = event {
-            kill_backend(handle);
+        match event {
+            // The window is still alive here, so its position/size are valid.
+            RunEvent::WindowEvent {
+                event: WindowEvent::CloseRequested { .. },
+                ..
+            } => save_window_state(handle),
+            RunEvent::Exit => {
+                save_window_state(handle);
+                kill_backend(handle);
+            }
+            _ => {}
         }
     });
 }

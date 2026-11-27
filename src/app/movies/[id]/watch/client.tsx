@@ -6,7 +6,7 @@ import { useRouter } from "@/lib/tauri-router";
 import { useRouteParam } from "@/lib/use-route-param";
 import VideoPlayer from "@/components/VideoPlayer";
 import IframePlayer from "@/components/IframePlayer";
-import { addToMovieHistory, addToMovieWatchlist, removeFromMovieWatchlist, setMovieWatchlistStatus, setAutoplayPref, type WatchStatus } from "@/lib/storage";
+import { addToMovieHistory, addToMovieWatchlist, removeFromMovieWatchlist, setMovieWatchlistStatus, setAutoplayPref, markSeasonWatched, type WatchStatus } from "@/lib/storage";
 import { useMovieWatchlistItems, useAutoplayPref, useMovieWatchedUpTo } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
@@ -400,7 +400,23 @@ export default function MovieWatchPage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wide">Season {season} Episodes</h2>
-            <button
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  markSeasonWatched(
+                    id,
+                    season,
+                    episodes.map((e) => e.episode_number),
+                    title || `Show ${id}`,
+                    poster,
+                  );
+                  toast("Season marked watched", "success");
+                }}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium bg-surface text-text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+              >
+                Mark season watched
+              </button>
+              <button
               onClick={toggleHideWatched}
               className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                 hideWatched ? "bg-accent/20 text-accent" : "bg-surface text-text-muted hover:text-foreground hover:bg-surface-hover"
@@ -409,6 +425,7 @@ export default function MovieWatchPage() {
             >
               Hide watched
             </button>
+            </div>
           </div>
           {visibleEpisodes.length === 0 ? (
             <p className="text-xs text-text-muted">All episodes watched</p>

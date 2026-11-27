@@ -738,6 +738,35 @@ export function getMovieSeasonWatched(id: string, season: number): number {
 export const getMovieSeasonWatchedSnapshot = (id: string, season: number): number =>
   cachedSnapshot(`movie-watched:${id}:${season}`, () => getMovieSeasonWatched(id, season));
 
+/** Bulk-mark every episode of a season as watched (skips ones already there). */
+export function markSeasonWatched(
+  id: string,
+  season: number,
+  episodes: number[],
+  title: string,
+  poster: string,
+) {
+  const history = getMovieHistory();
+  const existing = new Set(
+    history.filter((h) => h.id === id && h.season === season).map((h) => h.episode),
+  );
+  const now = Date.now();
+  const additions = episodes
+    .filter((ep) => !existing.has(ep))
+    .map((ep, index) => ({
+      id,
+      title,
+      poster,
+      type: "tv" as const,
+      season,
+      episode: ep,
+      timestamp: now + index,
+    }));
+  if (additions.length === 0) return;
+  set("movie-history", [...history, ...additions]);
+  invalidate("movie-history", "movie-continue");
+}
+
 /** Latest-viewed season/episode for a TV show (view-based high-water mark,
     mirroring getWatchedUpTo for anime). */
 export function getMovieWatchedUpTo(id: string): { season?: number; episode?: number } | null {

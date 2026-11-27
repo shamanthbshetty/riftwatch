@@ -16,6 +16,7 @@ import { showRefMatches } from "@/lib/show-match";
 import { useWatchlistItems, useAllHistory, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
 import { backendMediaUrl, backendUrl } from "@/lib/api-base";
+import { invoke } from "@tauri-apps/api/core";
 
 interface Source {
   sourceName: string;
@@ -552,6 +553,27 @@ function WatchContent() {
     goTo(Number(ep) + 1, mode);
   }, [ep, mode, goTo]);
 
+  const goPrev = useCallback(() => {
+    goTo(Math.max(1, Number(ep) - 1), mode);
+  }, [ep, mode, goTo]);
+
+  const downloadEpisode = useCallback(async () => {
+    if (!streamUrl || !streamUrl.includes("mp4-proxy")) {
+      toast("Only direct MP4 sources can be saved offline");
+      return;
+    }
+    try {
+      const filename = `${id}-ep${ep}-${mode}.mp4`;
+      const path = await invoke<string>("download_offline", { url: streamUrl, filename });
+      const list: unknown[] = JSON.parse(localStorage.getItem("offline-downloads") || "[]");
+      list.unshift({ id, ep, mode, path, title: showInfo?.name || titleParam_url || "", timestamp: Date.now() });
+      localStorage.setItem("offline-downloads", JSON.stringify(list.slice(0, 100)));
+      toast("Saved to Downloads", "success");
+    } catch (error) {
+      toast(`Download failed: ${String(error)}`);
+    }
+  }, [streamUrl, id, ep, mode, showInfo, titleParam_url, toast]);
+
   const onModeChange = useCallback((newMode: "sub" | "dub") => {
     goTo(Number(ep), newMode);
   }, [ep, goTo]);
@@ -683,6 +705,7 @@ function WatchContent() {
                 subtitles={playerSubtitles}
                 onEnded={autoPlay && hasNextEp ? goNext : undefined}
                 onNext={hasNextEp ? goNext : undefined}
+                onPrevious={Number(ep) > 1 ? goPrev : undefined}
                 autoAdvance={autoPlay}
                 nextTitle={epTitles[String(currentEp + 1)] ? `EP ${currentEp + 1} — ${epTitles[String(currentEp + 1)]}` : undefined}
                 onError={handleSourceError}
@@ -696,6 +719,16 @@ function WatchContent() {
             )
           )
         )}
+      </div>
+
+      <div className="flex items-center gap-2 mt-2">
+        <button
+          onClick={() => void downloadEpisode()}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-surface hover:bg-surface-hover text-text-muted border border-border transition-colors btn-tap"
+        >
+          Save offline
+        </button>
+        <span className="text-xs text-text-secondary">Direct MP4 sources only</span>
       </div>
 
       {/* Source selector */}

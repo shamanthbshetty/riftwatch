@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useSyncExternalStore } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { exportData, importData, getEpCache, refreshStore, subscribeStore, setAutoplayPref, setSkipPref, setResumePref } from "@/lib/storage";
 import { useWatchlistItems, useAutoplayPref, useSkipPref, useResumePref } from "@/lib/useWatchlists";
@@ -53,6 +54,31 @@ export default function SettingsPage() {
   // watchlist. Going through the external store keeps the server snapshot (0)
   // and client snapshot aligned — reading getEpCache() directly in render gave
   // the server 0 and the client N (hydration mismatch).
+  const [release, setRelease] = useState<{
+    tag: string;
+    body: string;
+    url: string;
+    date: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("https://api.github.com/repos/shamanthbshetty/riftwatch/releases/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setRelease({
+          tag: data.tag_name ?? "",
+          body: data.body ?? "No release notes.",
+          url: data.html_url ?? "",
+          date: (data.published_at ?? "").slice(0, 10),
+        });
+        localStorage.setItem("last-seen-release", data.tag_name ?? "");
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const trackingCount = useSyncExternalStore(
     subscribeStore,
     () => Object.keys(getEpCache()).filter((id) => watchlist.some((w) => w.id === id)).length,
@@ -112,6 +138,31 @@ export default function SettingsPage() {
         </button>
         <h1 className="text-xl font-semibold">Settings</h1>
       </div>
+
+      {/* What's New */}
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+          What&apos;s New
+        </h2>
+        <div className="bg-surface rounded-xl p-4 space-y-2 border border-border/50">
+          {release ? (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">{release.tag}</p>
+                <p className="text-xs text-text-secondary">{release.date}</p>
+              </div>
+              <pre className="whitespace-pre-wrap text-xs text-text-secondary max-h-40 overflow-y-auto">
+                {release.body}
+              </pre>
+              <a href={release.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
+                View full release →
+              </a>
+            </>
+          ) : (
+            <p className="text-xs text-text-secondary">Couldn&apos;t load release notes.</p>
+          )}
+        </div>
+      </section>
 
       {/* Data Management */}
       <section className="space-y-3">
@@ -185,6 +236,22 @@ export default function SettingsPage() {
             checked={resumePref}
             onChange={setResumePref}
           />
+        </div>
+      </section>
+
+      {/* Window */}
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Window</h2>
+        <div className="bg-surface rounded-xl p-4 border border-border/50">
+          <button
+            onClick={() => void invoke("reset_window")}
+            className="px-4 py-2 rounded-lg text-xs font-medium bg-surface-hover hover:bg-border text-text-muted border border-border transition-colors btn-tap"
+          >
+            Reset window position &amp; size
+          </button>
+          <p className="text-xs text-text-secondary mt-2">
+            The app remembers where you left the window. Use this if it opens somewhere unexpected.
+          </p>
         </div>
       </section>
 

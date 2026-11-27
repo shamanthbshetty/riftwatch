@@ -33,6 +33,8 @@ interface VideoPlayerProps {
   nextTitle?: string;
   /** Advance to the next episode (up-next card + auto-advance countdown). */
   onNext?: () => void;
+  /** Go back to the previous episode (N/P keyboard shortcuts). */
+  onPrevious?: () => void;
   /** Whether `onEnded` auto-advances (drives the countdown on the up-next card). */
   autoAdvance?: boolean;
   skipIntro?: { start: number; end: number } | null;
@@ -107,6 +109,7 @@ export default function VideoPlayer({
   storageKey,
   nextLabel,
   onNext,
+  onPrevious,
   nextTitle,
   autoAdvance = false,
 }: VideoPlayerProps) {
@@ -783,6 +786,12 @@ export default function VideoPlayer({
         case "f":
           void toggleFullscreen();
           break;
+        case "n":
+          onNext?.();
+          break;
+        case "p":
+          onPrevious?.();
+          break;
         case "escape": {
           if (menuOpenRef.current) setMenuOpen(false);
           break;
@@ -797,7 +806,7 @@ export default function VideoPlayer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, skip, seekTo, toggleFullscreen]);
+  }, [togglePlay, skip, seekTo, toggleFullscreen, onNext, onPrevious]);
 
   /* ------- progress bar scrubbing ------- */
   const onBarPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {

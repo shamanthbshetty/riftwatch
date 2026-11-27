@@ -3,6 +3,19 @@
 Watch anime, movies & TV shows. **Desktop-only** — the frontend ships as a
 static export inside a Tauri v2 app; there is no web deployment.
 
+## Features
+
+- Anime and movie/TV discovery, search with filters (genre, year, score, status, dub),
+  watchlists, history, notifications, resume positions, and theming.
+- Video player with subtitles, auto-skip for openings/endings, speed/quality controls,
+  and keyboard shortcuts (space/K play, J/K/L seek, arrows, N/P episodes, F fullscreen,
+  number keys jump by 10%). Windows media keys are supported too.
+- Settings → **What's New** shows the latest GitHub release notes; auto-updates are signed.
+- Rolling local backups (newest 5) plus manual Export/Import in Settings.
+- Remembers window size/position, with a **Reset window** button in Settings.
+- "Save offline" stores direct MP4 streams under `%APPDATA%\com.riftwatch.app\downloads`.
+  HLS streams are playlists plus many segments and are not supported for offline saving.
+
 ## Prerequisites
 
 - Node.js 22+ — [https://nodejs.org](https://nodejs.org)

@@ -68,6 +68,7 @@ jobs:
             generated automatically by the release workflow.
           releaseDraft: true
           prerelease: false
+          generateReleaseNotes: true
           args: --config src-tauri/tauri.updater.conf.json
           updaterJsonPreferNsis: true
           retryAttempts: 2
