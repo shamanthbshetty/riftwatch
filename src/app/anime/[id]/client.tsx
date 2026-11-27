@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { useRouter, usePathname, useParams } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useRouter } from "@/lib/tauri-router";
+import { useRouteParam } from "@/lib/use-route-param";
 import SubDubToggle from "@/components/SubDubToggle";
 import EpisodeList from "@/components/EpisodeList";
 import MediaCard from "@/components/MediaCard";
@@ -55,8 +57,7 @@ const RELATION_LABELS: Record<string, string> = {
 const EMPTY_TITLES: Record<string, string> = {};
 
 export default function AnimeDetailPage() {
-  const params = useParams();
-  const id = params.id as string;
+  const id = useRouteParam("id");
   const router = useRouter();
   const pathname = usePathname();
   const [mode, setMode] = useState<"sub" | "dub">("sub");

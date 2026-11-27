@@ -107,9 +107,19 @@ async fn main() {
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(3001);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("riftwatch-backend listening on {}", addr);
+    // Desktop sidecars bind loopback only (RIFTWATCH_BIND=127.0.0.1); the dev
+    // server keeps 0.0.0.0 so LAN access still works.
+    let bind: std::net::IpAddr = std::env::var("RIFTWATCH_BIND")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    let addr = SocketAddr::new(bind, port);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let bound = listener.local_addr().unwrap();
+    tracing::info!("riftwatch-backend listening on {}", bound);
+    // Machine-readable line for the Tauri sidecar supervisor. PORT=0 lets the
+    // OS pick a free port; the desktop app reads this to build its API base URL.
+    println!("RIFTWATCH_PORT={}", bound.port());
     axum::serve(listener, app).await.unwrap();
 }
 

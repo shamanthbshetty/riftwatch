@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useSearchParams, useRouter, useParams } from "next/navigation";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "@/lib/tauri-router";
+import { useRouteParam } from "@/lib/use-route-param";
 import VideoPlayer from "@/components/VideoPlayer";
 import IframePlayer from "@/components/IframePlayer";
 import { addToMovieHistory, addToMovieWatchlist, removeFromMovieWatchlist, setMovieWatchlistStatus, setAutoplayPref, type WatchStatus } from "@/lib/storage";
@@ -9,6 +11,7 @@ import { useMovieWatchlistItems, useAutoplayPref, useMovieWatchedUpTo } from "@/
 import { useToast } from "@/lib/toast";
 import WatchlistStatusButton, { STATUS_LABELS } from "@/components/WatchlistStatusButton";
 import { posterUrl } from "@/lib/movies";
+import { backendMediaUrl } from "@/lib/api-base";
 
 interface TVEpisode {
   episode_number: number;
@@ -40,10 +43,9 @@ const EMPTY_EPISODES: TVEpisode[] = [];
 const EMPTY_SEASONS: Season[] = [];
 
 export default function MovieWatchPage() {
-  const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const id = params.id as string;
+  const id = useRouteParam("id");
   // Anything other than an explicit ?type=tv is a movie — the old cast accepted
   // any garbage (type=banana → "banana") and only failed deep in the fetches.
   const type = searchParams.get("type") === "tv" ? "tv" : "movie";
@@ -90,6 +92,12 @@ export default function MovieWatchPage() {
   const current = stream?.key === streamKey ? stream : null;
   const sources = current?.sources ?? EMPTY_SOURCES;
   const subtitles = current?.subtitles ?? EMPTY_SUBS;
+  // Subtitle URLs from the backend are relative proxy paths; in Tauri they must
+  // point at the sidecar instead of the custom protocol origin.
+  const playerSubtitles = useMemo(
+    () => subtitles.map((s) => ({ ...s, url: backendMediaUrl(s.url) })),
+    [subtitles],
+  );
   const title = current?.title ?? "";
   const poster = current?.poster ?? "";
   const error = current?.error ?? "";
@@ -302,8 +310,8 @@ export default function MovieWatchPage() {
       {!loading && !error && currentSource?.streamUrl && !playerError && (
         <VideoPlayer
           key={playerKey}
-          src={currentSource.streamUrl}
-          subtitles={subtitles}
+          src={backendMediaUrl(currentSource.streamUrl)}
+          subtitles={playerSubtitles}
           onError={handlePlayerError}
           onEnded={type === "tv" && hasNext && autoPlay ? handleNextEpisode : undefined}
           onFirstPlay={markPlayed}

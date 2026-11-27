@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useRouter } from "@/lib/tauri-router";
 import { useState, useEffect, useRef } from "react";
 import {
   markAllRead, markNotificationRead, removeNotification,

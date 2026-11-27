@@ -51,6 +51,10 @@ next-env.d.ts
 /src-tauri/binaries/
 /out/
 
+# tauri updater signing keys (never commit private keys or passwords)
+/src-tauri/keys/*.key
+/src-tauri/keys/*.password
+
 # ai workflow artifacts
 swarm-blackboard.md
 swarm-outputs/

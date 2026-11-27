@@ -1,0 +1,73 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example v0.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust-backend -> target
+            src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Rust backend
+        run: cargo build --release --manifest-path rust-backend/Cargo.toml
+
+      - name: Stage sidecar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path src-tauri/binaries -Force | Out-Null
+          Copy-Item rust-backend/target/release/riftwatch-backend.exe `
+            src-tauri/binaries/riftwatch-backend-x86_64-pc-windows-msvc.exe
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "RiftWatch ${{ inputs.tag || github.ref_name }}"
+          releaseBody: |
+            Download `-setup.exe` below, then launch RiftWatch.
+
+            The `.sig` file next to it is used by the built-in updater and is
+            generated automatically by the release workflow.
+          releaseDraft: true
+          prerelease: false
+          args: --config src-tauri/tauri.updater.conf.json
+          updaterJsonPreferNsis: true
+          retryAttempts: 2

@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams, useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { useRouteParam } from "@/lib/use-route-param";
 import Link from "next/link";
 import { posterUrl, backdropUrl, type MovieDetail, type MovieResult } from "@/lib/movies";
 import { addToMovieWatchlist, removeFromMovieWatchlist, setMovieWatchlistStatus, formatMediaTime, type WatchStatus } from "@/lib/storage";
@@ -34,9 +35,8 @@ function SeasonLink({ id, season }: { id: string; season: { season_number: numbe
 }
 
 export default function MovieDetailPage() {
-  const params = useParams();
   const searchParams = useSearchParams();
-  const id = params.id as string;
+  const id = useRouteParam("id");
   // Anything other than an explicit ?type=tv is a movie — the old cast let
   // garbage (type=banana) through as "banana" until the API rejected it.
   const type = searchParams.get("type") === "tv" ? "tv" : "movie";

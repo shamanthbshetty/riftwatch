@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter, notFound } from "next/navigation";
+import { useParams, notFound } from "next/navigation";
+import { useRouter } from "@/lib/tauri-router";
 import { Search } from "lucide-react";
 import AnimeCard from "@/components/AnimeCard";
 import MovieCard from "@/components/MovieCard";

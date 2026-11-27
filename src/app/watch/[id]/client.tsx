@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef, Suspense } from "react";
-import { useSearchParams, useRouter, useParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "@/lib/tauri-router";
+import { useRouteParam } from "@/lib/use-route-param";
 import Link from "next/link";
 import VideoPlayer from "@/components/VideoPlayer";
 import IframePlayer from "@/components/IframePlayer";
@@ -13,6 +15,7 @@ import { sameShow } from "@/lib/show-id";
 import { showRefMatches } from "@/lib/show-match";
 import { useWatchlistItems, useAllHistory, useWatchedUpTo, useAutoplayPref, useSkipPref } from "@/lib/useWatchlists";
 import { useToast } from "@/lib/toast";
+import { backendMediaUrl, backendUrl } from "@/lib/api-base";
 
 interface Source {
   sourceName: string;
@@ -61,10 +64,9 @@ interface AniskipResult {
 const skipCache = new Map<string, { intro: SkipInterval | null; outro: SkipInterval | null }>();
 
 function WatchContent() {
-  const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const id = params.id as string;
+  const id = useRouteParam("id");
   const epParam = searchParams.get("ep");
   const modeParam = searchParams.get("mode");
 
@@ -279,8 +281,9 @@ function WatchContent() {
     let url = src.sourceUrl;
     if (url.startsWith("//")) url = "https:" + url;
     if (src.streamUrl) {
-      // Direct HLS stream (with subtitle tracks) — already proxied by the source.
-      return src.streamUrl;
+      // Direct HLS stream (with subtitle tracks) — already proxied by the
+      // backend, but its URL is relative so it must target the sidecar.
+      return backendMediaUrl(src.streamUrl);
     }
     if (src.isEmbed) {
       // ponytail: embed pages run their own JS — can't be proxied as video, use direct iframe
@@ -291,8 +294,18 @@ function WatchContent() {
       : src.sourceName === "Fm-Hls" ? "https://bysekoze.com/"
       : src.sourceName === "Uni" ? "https://watchanime.uns.bio/"
       : "";
-    return `/api/proxy?src=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer)}`;
+    return backendUrl(`/api/proxy?src=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer)}`);
   }, [sources, selectedSource]);
+
+  // Subtitle URLs come from the backend as relative proxy paths; in Tauri they
+  // must resolve against the sidecar rather than the custom protocol origin.
+  const playerSubtitles = useMemo(
+    () => (sources[selectedSource]?.subtitles ?? EMPTY_SUBTITLES).map((s) => ({
+      ...s,
+      url: backendMediaUrl(s.url),
+    })),
+    [sources, selectedSource],
+  );
 
   // Source failover: when a source errors, try the next one.
   // Two guards: (1) hls.js can emit two fatal errors in the same tick — two
@@ -640,7 +653,7 @@ function WatchContent() {
                 key={streamUrl}
                 src={streamUrl}
                 type={sources[selectedSource]?.type}
-                subtitles={sources[selectedSource]?.subtitles ?? EMPTY_SUBTITLES}
+                subtitles={playerSubtitles}
                 onEnded={autoPlay && hasNextEp ? goNext : undefined}
                 onNext={hasNextEp ? goNext : undefined}
                 autoAdvance={autoPlay}

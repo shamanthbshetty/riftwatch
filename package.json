@@ -7,12 +7,12 @@
     "dev:open": "node scripts/dev.mjs --open",
     "dev:next": "next dev",
     "dev:rust": "rust-backend/target/release/riftwatch-backend",
-    "dev:tauri": "tauri dev",
+    "dev:tauri": "node scripts/tauri-run.mjs dev",
     "stop": "node scripts/stop.mjs",
     "build": "next build",
-    "build:rust": "cargo build --release",
+    "build:rust": "cargo build --release --manifest-path rust-backend/Cargo.toml",
     "build:tauri": "node -e \"process.env.TAURI_BUILD='1';const{execSync}=require('child_process');execSync('npx next build',{stdio:'inherit'})\"",
-    "tauri:build": "tauri build",
+    "tauri:build": "node scripts/tauri-run.mjs build",
     "clean:rust": "node scripts/clean-rust.mjs",
     "start": "next start",
     "lint": "eslint",
@@ -20,6 +20,7 @@
     "check": "node scripts/check.mjs"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.5",
     "hls.js": "^1.6.16",
     "lucide-react": "^1.70.0",
     "next": "16.2.10",
