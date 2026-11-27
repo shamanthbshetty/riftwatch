@@ -60,12 +60,19 @@
 :root {
   --nav-h: 76px;
   --page-top: calc(var(--nav-h) + 20px);
-  --gutter: 24px;
+  /* One shared rhythm: the space between posters is also the page gutter. */
+  --card-gap: 20px;
+  --gutter: var(--card-gap);
   --section-gap: 56px;
 }
 
 @utility page-top {
   padding-top: var(--page-top);
+}
+
+@utility page-gutter {
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
 }
 
 body {
@@ -94,7 +101,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .carousel-scroll {
   display: flex;
-  gap: 14px;
+  gap: var(--card-gap);
   overflow-x: auto;
   overflow-y: visible;
   scroll-snap-type: x mandatory;
@@ -109,9 +116,9 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Rail cards: two fit the available width on narrow windows (e.g. a browser
    with vertical tabs), and cap at their design width on larger ones. The
-   14px matches .carousel-scroll's gap so two cards + gap = 100%. */
+   shared gap matches .carousel-scroll so two cards + gap = 100%. */
 .rail-card {
-  flex: 0 0 calc((100% - 14px) / 2);
+  flex: 0 0 calc((100% - var(--card-gap)) / 2);
   max-width: 168px;
   min-width: 0;
 }

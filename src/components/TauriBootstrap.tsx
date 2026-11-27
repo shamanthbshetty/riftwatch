@@ -4,12 +4,12 @@
 // relative "/api/..." calls reach the sidecar backend, and forces full page
 // loads for dynamic routes (the static export only has `_` placeholders).
 // No-op in the browser.
-import { installFetchPatch, isTauri } from "@/lib/api-base";
+import { installFetchPatch } from "@/lib/api-base";
 import { isDynamicAppPath } from "@/lib/tauri-router";
 
 installFetchPatch();
 
-if (isTauri() && typeof document !== "undefined") {
+if (typeof document !== "undefined") {
   document.addEventListener(
     "click",
     (event) => {

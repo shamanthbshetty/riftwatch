@@ -56,7 +56,7 @@ export default function MoviesSection({ children }: { children?: ReactNode }) {
     <div className="pb-16">
       <MovieSpotlightCarousel />
 
-      <div className="mx-auto w-full space-y-14 px-6 md:px-10">
+      <div className="mx-auto w-full space-y-14 page-gutter">
         {children}
 
         {trendingLoading && (

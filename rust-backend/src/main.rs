@@ -6,7 +6,7 @@ use axum::{
 };
 use serde_json::json;
 use std::net::SocketAddr;
-use tower_http::{cors::CorsLayer, trace::TraceLayer, services::ServeDir};
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod routes;
@@ -101,7 +101,6 @@ async fn main() {
         .route("/api/top-rated", get(routes::anime_api::top_rated))
         .route("/api/random", get(routes::anime_api::random))
         .route("/api/stream", get(routes::stream::handler))
-        .nest_service("/static", ServeDir::new("out"))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

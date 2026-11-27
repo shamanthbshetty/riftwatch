@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { useRouter as useNextRouter } from "next/navigation";
-import { isTauri } from "./api-base";
 
 // The desktop build is a static export, so every dynamic route only exists as a
 // `_` placeholder (`anime/_.html`, `movies/_/watch.html`, ...). Client-side
@@ -20,14 +19,14 @@ export function useRouter() {
     () => ({
       ...router,
       push(href: string) {
-        if (isTauri() && isDynamicAppPath(href)) {
+        if (isDynamicAppPath(href)) {
           window.location.assign(href);
         } else {
           router.push(href);
         }
       },
       replace(href: string) {
-        if (isTauri() && isDynamicAppPath(href)) {
+        if (isDynamicAppPath(href)) {
           window.location.replace(href);
         } else {
           router.replace(href);

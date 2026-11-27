@@ -1,7 +1,6 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { isTauri } from "./api-base";
 
 /**
  * Resolves a dynamic route segment.
@@ -19,7 +18,7 @@ export function useRouteParam(name: string, index = 1): string {
   const raw = params?.[name];
   const fromNext = typeof raw === "string" ? raw : "";
 
-  if (isTauri() && typeof window !== "undefined") {
+  if (typeof window !== "undefined") {
     const segment = window.location.pathname.split("/").filter(Boolean)[index];
     if (segment) {
       try {

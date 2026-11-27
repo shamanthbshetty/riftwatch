@@ -7,8 +7,8 @@ on:
   pull_request:
 
 jobs:
-  web:
-    name: Web app
+  frontend:
+    name: Desktop frontend
     runs-on: ubuntu-latest
 
     steps:
@@ -30,10 +30,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
-        run: npm run build
-
-      - name: Build static export (desktop)
+      - name: Build static export
         run: npm run build:tauri
 
   rust:
