@@ -1,6 +1,6 @@
 [package]
 name = "riftwatch"
-version = "0.3.1"
+version = "0.3.2"
 description = "RiftWatch desktop app"
 authors = ["you"]
 license = ""
